@@ -1,0 +1,21 @@
+
+================================-----------------================================
+ENVIRONMENTAL ROLE ANALYSIS: TEMPERATURE AND HUMIDITY CONTRIBUTION TO RISK
+================================-----------------================================
+
+Based on our biological model rules and the resulting trained Machine Learning models:
+
+1. TEMPERATURE CONTRIBUTION:
+   - Poultry, particularly broiler and laying chickens, have a tight thermoneutral zone (typically between 18°C and 24°C).
+   - High temperatures (>30°C to 32°C) trigger severe HEAT STRESS. To cool off, birds pant, which increases respiratory rates and makes their mucous membranes dry and highly vulnerable to viral pathogens (e.g., Newcastle Disease, Infectious Bronchitis, Avian Influenza).
+   - In our model, extreme high temperatures (>34°C) combined with 'Unvaccinated' status immediately flag a 'Medium' to 'High' risk environment.
+   - Low temperatures (<14°C) trigger cold stress, where chicks crowd together to conserve heat. Crowding dramatically increases the contact rate between birds, accelerating pathogen transmission and boosting the disease outbreak risk.
+
+2. HUMIDITY CONTRIBUTION:
+   - High relative humidity (>80%) restricts the bird's ability to dissipate heat through evaporative cooling (panting), vastly multiplying heat stress and causing heat stroke or respiratory arrest.
+   - High humidity combined with warm conditions also creates a breeding ground for litter-borne pathogens (like Salmonella and Coccidiosis) and elevates toxic ammonia levels from feces.
+   - Low humidity (<40%) makes the poultry house dry and dusty, causing mechanical irritation in the respiratory tracts of active birds, leading to viral infections.
+
+3. COMBINED IMPACT (HI OR THI):
+   - The interactions between Temperature and Humidity are multiplicative: a moderate temperature of 30°C at 50% humidity is manageable, but at 85% humidity it becomes LETHAL.
+   - This multiplicative relationship is why non-linear, tree-based models like XGBoost and Random Forest easily outperform linear models like Logistic Regression in this biosecurity domain.
