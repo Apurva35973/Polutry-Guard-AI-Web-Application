@@ -1,340 +1,499 @@
-import os
-import pickle
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+from __future__ import annotations
 
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+
+import joblib
+import numpy as np
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    precision_recall_fscore_support,
+)
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.ensemble import RandomForestClassifier
-from xgboost import XGBClassifier
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, precision_recall_fscore_support, confusion_matrix, f1_score
 from sklearn.utils.class_weight import compute_sample_weight
 
-# Set style for professional-grade charts
-plt.style.use('seaborn-v0_8-whitegrid')
-sns.set_theme(style="whitegrid")
-plt.rcParams['font.family'] = 'sans-serif'
-plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'Helvetica']
+try:
+    from xgboost import XGBClassifier
+except ImportError:  # XGBoost is optional for environments that do not have it yet.
+    XGBClassifier = None
 
-# Define paths
-data_dir = r"d:\Polutry Guard\Polutry-Guard-AI\Temperature and Humidity Sensory Data"
-data_path = os.path.join(data_dir, "poultry_biosecurity_dataset.csv")
-output_model_path = os.path.join(data_dir, "poultry_risk_model.pkl")
 
-print("=================================================================")
-print("  POULTRY BIOSECURITY DISEASE OUTBREAK RISK ML PIPELINE STARTING")
-print("=================================================================")
+BASE_DIR = Path(__file__).resolve().parent
+DATA_PATH = BASE_DIR / "poultry_preprocessed_data (1).csv"
+MODEL_PATH = BASE_DIR / "poultry_guard_risk_pipeline.joblib"
+ANALYSIS_PATH = BASE_DIR / "dataset_analysis_report.csv"
+MODEL_REPORT_PATH = BASE_DIR / "model_comparison_report.csv"
 
-# -------------------------------------------------------------
-# 1. LOAD DATA & MISSING VALUE ANALYSIS
-# -------------------------------------------------------------
-print("\n[Step 1] Loading Dataset & Analyzing Missing Values...")
-df = pd.read_csv(data_path)
-print(f"Dataset shape: {df.shape[0]} rows, {df.shape[1]} columns.")
+TARGET_COL = "Risk_Level"
+LABEL_METHOD_COL = "Risk_Label_Method"
+RISK_ORDER = ["Low", "Medium", "High"]
+CLASS_MAPPING = {label: idx for idx, label in enumerate(RISK_ORDER)}
+INV_CLASS_MAPPING = {idx: label for label, idx in CLASS_MAPPING.items()}
 
-# Missing value analysis
-missing_counts = df.isnull().sum()
-missing_pcts = (df.isnull().sum() / len(df)) * 100
-missing_report = pd.DataFrame({
-    'Missing Count': missing_counts,
-    'Percentage (%)': missing_pcts
-})
-print("\n--- Missing Value Report ---")
-print(missing_report)
+CANONICAL_FEATURES = {
+    "Temperature": ["Temperature", "Temperature (C)", "Temperature (°C)", "Temperature (Â°C)"],
+    "Humidity": ["Humidity", "Humidity (%)"],
+    "Mortality_Rate": ["Mortality_Rate", "Mortality_Rate (%)"],
+    "Egg_Production": ["Egg_Production"],
+    "Amount_of_Feeding": ["Amount_of_Feeding", "Amount_of_Feeding (kg/day)"],
+    "Active_Birds": ["Active_Birds"],
+    "Bird_Age": ["Bird_Age", "Bird_Age (days)"],
+    "Vaccination_Status": ["Vaccination_Status"],
+}
 
-# Save missing value analysis to file
-missing_report.to_csv(os.path.join(data_dir, "eda_missing_value_report.csv"))
-print("Saved missing value report to 'eda_missing_value_report.csv'")
-
-# -------------------------------------------------------------
-# 2. EXPLORATORY DATA ANALYSIS (EDA) & VISUALIZATIONS
-# -------------------------------------------------------------
-print("\n[Step 2] Performing Exploratory Data Analysis (EDA) & Creating Plots...")
-
-# 2.1 Distribution Plots
-print("Generating distribution plots...")
-fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-fig.suptitle("Key Features and Target Class Distributions", fontsize=18, fontweight='bold', color='#1e293b')
-
-# Temperature Distribution
-sns.histplot(data=df, x="Temperature (°C)", hue="Risk_Level", multiple="stack", palette="crest", ax=axes[0, 0], kde=True)
-axes[0, 0].set_title("Temperature Distribution by Risk Level", fontsize=14, fontweight='semibold')
-axes[0, 0].set_xlabel("Temperature (°C)", fontsize=12)
-
-# Humidity Distribution
-sns.histplot(data=df, x="Humidity (%)", hue="Risk_Level", multiple="stack", palette="mako", ax=axes[0, 1], kde=True)
-axes[0, 1].set_title("Humidity Distribution by Risk Level", fontsize=14, fontweight='semibold')
-axes[0, 1].set_xlabel("Humidity (%)", fontsize=12)
-
-# Mortality Rate Distribution
-sns.histplot(data=df, x="Mortality_Rate (%)", hue="Risk_Level", multiple="stack", palette="rocket_r", ax=axes[1, 0], log_scale=(False, True))
-axes[1, 0].set_title("Mortality Rate Distribution (Log Scale Count)", fontsize=14, fontweight='semibold')
-axes[1, 0].set_xlabel("Mortality_Rate (%)", fontsize=12)
-
-# Target Variable Distribution
-sns.countplot(data=df, x="Risk_Level", order=["Low", "Medium", "High"], palette=["#10b981", "#f59e0b", "#ef4444"], ax=axes[1, 1])
-axes[1, 1].set_title("Target Outbreak Risk Level Count", fontsize=14, fontweight='semibold')
-axes[1, 1].set_xlabel("Risk Level", fontsize=12)
-
-plt.tight_layout()
-dist_plot_path = os.path.join(data_dir, "eda_distributions.png")
-plt.savefig(dist_plot_path, dpi=300)
-plt.close()
-print(f"Saved distributions plot to '{dist_plot_path}'")
-
-# 2.2 Correlation Matrix Heatmap
-print("Generating correlation matrix heatmap...")
-# First encode the vaccination status and target risk level to numbers for correlation
-df_corr = df.copy()
-df_corr['Vaccination_Status_Encoded'] = df_corr['Vaccination_Status'].map({'Vaccinated': 1, 'Unvaccinated': 0})
-df_corr['Risk_Level_Encoded'] = df_corr['Risk_Level'].map({'Low': 0, 'Medium': 1, 'High': 2})
-
-# Drop categorical string columns
-df_corr_numeric = df_corr.drop(columns=['Vaccination_Status', 'Risk_Level'])
-
-plt.figure(figsize=(12, 10))
-# Let's create a beautiful custom divergent colormap
-cmap = sns.diverging_palette(230, 20, as_cmap=True)
-sns.heatmap(df_corr_numeric.corr(), annot=True, fmt=".2f", cmap=cmap, vmin=-1.0, vmax=1.0, linewidths=0.5, square=True,
-            cbar_kws={"shrink": .8}, annot_kws={"size": 10, "weight": "semibold"})
-plt.title("Correlation Matrix of Poultry Farm Features", fontsize=16, fontweight='bold', pad=20, color='#1e293b')
-plt.tight_layout()
-corr_plot_path = os.path.join(data_dir, "eda_correlation_matrix.png")
-plt.savefig(corr_plot_path, dpi=300)
-plt.close()
-print(f"Saved correlation matrix to '{corr_plot_path}'")
-
-# -------------------------------------------------------------
-# 3. DATA PREPROCESSING
-# -------------------------------------------------------------
-print("\n[Step 3] Preprocessing Data...")
-
-# Map target variable
-risk_map = {'Low': 0, 'Medium': 1, 'High': 2}
-inv_risk_map = {0: 'Low', 1: 'Medium', 2: 'High'}
-df['Risk_Level_Encoded'] = df['Risk_Level'].map(risk_map)
-
-# Encode Vaccination_Status: Vaccinated -> 1, Unvaccinated -> 0
-df['Vaccination_Status_Encoded'] = df['Vaccination_Status'].map({'Vaccinated': 1, 'Unvaccinated': 0})
-
-# Select feature columns (excluding string values and encoded targets)
-feature_cols = [
-    'Temperature (°C)',
-    'Humidity (%)',
-    'Mortality_Rate (%)',
-    'Egg_Production',
-    'Amount_of_Feeding (kg/day)',
-    'Active_Birds',
-    'Bird_Age (days)',
-    'Vaccination_Status_Encoded'
+REQUIRED_CONCEPTS = [
+    "Temperature",
+    "Humidity",
+    "Mortality_Rate",
+    "Egg_Production",
+    "Amount_of_Feeding",
+    "Active_Birds",
+    "Bird_Age",
+    "Vaccination_Status",
 ]
 
-X = df[feature_cols]
-y = df['Risk_Level_Encoded']
 
-# Train-Test Split (80% train, 20% test)
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42, stratify=y)
-print(f"Training set: X_train shape: {X_train.shape}, y_train shape: {y_train.shape}")
-print(f"Testing set: X_test shape: {X_test.shape}, y_test shape: {y_test.shape}")
+def find_column(df: pd.DataFrame, concept: str) -> str | None:
+    for candidate in CANONICAL_FEATURES[concept]:
+        if candidate in df.columns:
+            return candidate
+    return None
 
-# Scale only numerical features (exclude binary vaccination status encoded)
-numeric_cols = [col for col in feature_cols if col != 'Vaccination_Status_Encoded']
-print(f"Scaling numeric features: {numeric_cols}")
 
-scaler = StandardScaler()
-X_train_scaled = X_train.copy()
-X_test_scaled = X_test.copy()
+def normalize_humidity(value: float) -> float:
+    if pd.isna(value):
+        return np.nan
+    value = float(value)
+    if 0 <= value <= 1.5:
+        return value * 100.0
+    return value
 
-X_train_scaled[numeric_cols] = scaler.fit_transform(X_train[numeric_cols])
-X_test_scaled[numeric_cols] = scaler.transform(X_test[numeric_cols])
 
-# -------------------------------------------------------------
-# 4. TRAINING CLASSIFICATION MODELS
-# -------------------------------------------------------------
-print("\n[Step 4] Training Multiple Classification Models...")
+def classify_environment_status(temperature: float, humidity: float) -> str:
+    temp_critical = temperature >= 35 or temperature <= 12
+    hum_critical = humidity >= 85 or humidity <= 30
+    temp_warning = temperature >= 30 or temperature <= 18
+    hum_warning = humidity >= 70 or humidity <= 40
 
-models = {
-    "Logistic Regression": LogisticRegression(class_weight='balanced', solver='lbfgs', max_iter=1000, random_state=42),
-    "Decision Tree": DecisionTreeClassifier(class_weight='balanced', max_depth=6, random_state=42),
-    "Random Forest": RandomForestClassifier(class_weight='balanced', n_estimators=150, max_depth=12, random_state=42, n_jobs=-1),
-    "XGBoost": XGBClassifier(n_estimators=150, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1)
-}
+    if temp_critical or hum_critical:
+        return "CRITICAL"
+    if temp_warning or hum_warning:
+        return "WARNING"
+    return "NORMAL"
 
-# -------------------------------------------------------------
-# 5. MODEL COMPARISON
-# -------------------------------------------------------------
-print("\n[Step 5] Evaluating and Comparing Models...")
 
-comparison_data = []
-confusion_matrices = {}
+def derive_rule_based_risk(row: pd.Series) -> str:
+    """Transparent proxy label when real Risk_Level labels are absent."""
+    points = 0
 
-fig, axes = plt.subplots(2, 2, figsize=(14, 12))
-axes = axes.flatten()
+    mortality = row.get("Mortality_Rate")
+    temperature = row.get("Temperature")
+    humidity = row.get("Humidity")
+    egg_production = row.get("Egg_Production")
+    feeding = row.get("Amount_of_Feeding")
 
-# Calculate training sample weights for XGBoost to balance it
-xgb_sample_weights = compute_sample_weight(class_weight='balanced', y=y_train)
+    if pd.notna(mortality):
+        if mortality >= 0.05:
+            points += 3
+        elif mortality >= 0.03:
+            points += 2
+        elif mortality >= 0.02:
+            points += 1
 
-for idx, (name, model) in enumerate(models.items()):
-    print(f"  Training {name}...")
-    if name == "XGBoost":
-        model.fit(X_train_scaled, y_train, sample_weight=xgb_sample_weights)
+    if pd.notna(temperature):
+        if temperature >= 35 or temperature <= 12:
+            points += 2
+        elif temperature >= 30 or temperature <= 18:
+            points += 1
+
+    if pd.notna(humidity):
+        if humidity >= 85 or humidity <= 30:
+            points += 2
+        elif humidity >= 70 or humidity <= 40:
+            points += 1
+
+    # These are transparent proxy thresholds, not disease labels.
+    if pd.notna(egg_production) and egg_production < 700:
+        points += 1
+    if pd.notna(feeding) and feeding < 3500:
+        points += 1
+
+    if points >= 4:
+        return "High"
+    if points >= 2:
+        return "Medium"
+    return "Low"
+
+
+def inspect_dataset(df: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    for concept in REQUIRED_CONCEPTS:
+        column = find_column(df, concept)
+        if column is None:
+            rows.append(
+                {
+                    "Column": concept,
+                    "Present?": "No",
+                    "Missing %": 100.0,
+                    "Data Type": "absent",
+                    "Possible Use": missing_feature_strategy(concept),
+                }
+            )
+            continue
+
+        rows.append(
+            {
+                "Column": column,
+                "Present?": "Yes",
+                "Missing %": round(float(df[column].isna().mean() * 100), 3),
+                "Data Type": str(df[column].dtype),
+                "Possible Use": possible_use(concept),
+            }
+        )
+
+    for column in [TARGET_COL, "Disease", "Disease_Label", "Outbreak", "Health_Status"]:
+        rows.append(
+            {
+                "Column": column,
+                "Present?": "Yes" if column in df.columns else "No",
+                "Missing %": round(float(df[column].isna().mean() * 100), 3)
+                if column in df.columns
+                else 100.0,
+                "Data Type": str(df[column].dtype) if column in df.columns else "absent",
+                "Possible Use": "Model target/label" if column in df.columns else "Not available as a target",
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def possible_use(concept: str) -> str:
+    return {
+        "Temperature": "Environmental stress indicator; validate in Celsius.",
+        "Humidity": "Environmental stress indicator; normalize fraction/percent units.",
+        "Mortality_Rate": "Direct flock-health signal and strongest proxy-label input.",
+        "Egg_Production": "Production drop indicator; useful for risk prediction.",
+        "Amount_of_Feeding": "Feed intake proxy; useful for risk prediction.",
+        "Active_Birds": "Needed to derive per-bird production/feed metrics if collected.",
+        "Bird_Age": "Important age/type context for thresholds and model behavior.",
+        "Vaccination_Status": "Management-risk categorical feature if collected.",
+    }[concept]
+
+
+def missing_feature_strategy(concept: str) -> str:
+    return {
+        "Active_Birds": "Absent; collect from farm records/web app. Cannot be derived reliably.",
+        "Bird_Age": "Absent; collect per flock cycle. Cannot be derived reliably.",
+        "Vaccination_Status": "Absent; collect manually or from vaccination records.",
+    }.get(concept, "Absent; do not fabricate silently.")
+
+
+def build_training_frame(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    df = raw_df.copy()
+    rename_map = {}
+    for concept in REQUIRED_CONCEPTS:
+        column = find_column(df, concept)
+        if column:
+            rename_map[column] = concept
+    df = df.rename(columns=rename_map)
+
+    before_rows = len(df)
+    df = df.drop_duplicates().reset_index(drop=True)
+
+    if "Humidity" in df.columns:
+        df["Humidity"] = df["Humidity"].apply(normalize_humidity)
+
+    numeric_present = [c for c in REQUIRED_CONCEPTS if c in df.columns and c != "Vaccination_Status"]
+    for column in numeric_present:
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+
+    invalid_masks = []
+    if "Temperature" in df.columns:
+        invalid_masks.append(df["Temperature"].lt(0) | df["Temperature"].gt(50))
+    if "Humidity" in df.columns:
+        invalid_masks.append(df["Humidity"].lt(0) | df["Humidity"].gt(100))
+    if "Mortality_Rate" in df.columns:
+        invalid_masks.append(df["Mortality_Rate"].lt(0))
+    if "Egg_Production" in df.columns:
+        invalid_masks.append(df["Egg_Production"].lt(0))
+    if "Amount_of_Feeding" in df.columns:
+        invalid_masks.append(df["Amount_of_Feeding"].lt(0))
+
+    if invalid_masks:
+        invalid_mask = np.logical_or.reduce(invalid_masks)
+        df = df.loc[~invalid_mask].reset_index(drop=True)
+
+    if TARGET_COL not in df.columns:
+        df[TARGET_COL] = df.apply(derive_rule_based_risk, axis=1)
+        df[LABEL_METHOD_COL] = "rule_based_proxy_v1"
     else:
-        model.fit(X_train_scaled, y_train)
-    
-    # Predict on test set
-    y_pred = model.predict(X_test_scaled)
-    
-    # Calculate performance metrics
-    accuracy = accuracy_score(y_test, y_pred)
-    balanced_acc = balanced_accuracy_score(y_test, y_pred)
-    precision, recall, f1_weighted, _ = precision_recall_fscore_support(y_test, y_pred, average='weighted')
-    f1_macro = f1_score(y_test, y_pred, average='macro')
-    
-    # Store performance data
-    comparison_data.append({
-        "Model": name,
-        "Accuracy": accuracy,
-        "Balanced Accuracy": balanced_acc,
-        "Precision (W)": precision,
-        "Recall (W)": recall,
-        "F1 Score (Weighted)": f1_weighted,
-        "F1 Score (Macro)": f1_macro
-    })
-    
-    # Calculate confusion matrix
-    cm = confusion_matrix(y_test, y_pred)
-    confusion_matrices[name] = cm
-    
-    # Plot confusion matrix
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=["Low", "Medium", "High"], yticklabels=["Low", "Medium", "High"],
-                ax=axes[idx], cbar=False, annot_kws={"size": 14, "weight": "bold"})
-    axes[idx].set_title(f"Confusion Matrix: {name}", fontsize=14, fontweight='bold', pad=10)
-    axes[idx].set_xlabel("Predicted Label", fontsize=11)
-    axes[idx].set_ylabel("True Label", fontsize=11)
+        df[LABEL_METHOD_COL] = "dataset_provided"
 
-plt.suptitle("Model Evaluation: Confusion Matrices", fontsize=18, fontweight='bold', y=0.98, color='#1e293b')
-plt.tight_layout()
-cm_plot_path = os.path.join(data_dir, "model_confusion_matrices.png")
-plt.savefig(cm_plot_path, dpi=300)
-plt.close()
-print(f"Saved combined confusion matrices plot to '{cm_plot_path}'")
+    metadata = {
+        "source_dataset": str(DATA_PATH.name),
+        "rows_before_cleaning": before_rows,
+        "rows_after_cleaning": int(len(df)),
+        "duplicates_removed": int(before_rows - len(raw_df.drop_duplicates())),
+        "label_method": str(df[LABEL_METHOD_COL].iloc[0]),
+        "humidity_unit_handling": "Values <= 1.5 are interpreted as fractions and multiplied by 100.",
+        "invalid_value_policy": "Rows outside fixed realistic ranges are removed before split.",
+    }
+    return df, metadata
 
-# Display comparison results in a beautiful pandas table
-comparison_df = pd.DataFrame(comparison_data)
-print("\n================================== MODEL COMPARISON METRICS ==================================")
-print(comparison_df.to_string(index=False, formatters={
-    "Accuracy": "{:.4f}".format,
-    "Balanced Accuracy": "{:.4f}".format,
-    "Precision (W)": "{:.4f}".format,
-    "Recall (W)": "{:.4f}".format,
-    "F1 Score (Weighted)": "{:.4f}".format,
-    "F1 Score (Macro)": "{:.4f}".format
-}))
-print("==============================================================================================")
 
-# Save metrics comparison to CSV
-comparison_df.to_csv(os.path.join(data_dir, "model_comparison_report.csv"), index=False)
+def build_models(numeric_features: list[str], categorical_features: list[str]) -> dict[str, Pipeline]:
+    numeric_pipeline = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler()),
+        ]
+    )
+    categorical_pipeline = Pipeline(
+        steps=[
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("encoder", OneHotEncoder(handle_unknown="ignore")),
+        ]
+    )
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("num", numeric_pipeline, numeric_features),
+            ("cat", categorical_pipeline, categorical_features),
+        ],
+        remainder="drop",
+    )
 
-# Identify best model based on Macro F1 Score
-best_idx = comparison_df['F1 Score (Macro)'].idxmax()
-best_model_name = comparison_df.iloc[best_idx]['Model']
-best_model_obj = models[best_model_name]
-print(f"\n[Step 6] Best-Performing Model Identified: **{best_model_name}** with Macro F1-Score of {comparison_df.iloc[best_idx]['F1 Score (Macro)']:.4f}!")
+    model_defs = {
+        "Logistic Regression": LogisticRegression(
+            class_weight="balanced", max_iter=1000, random_state=42
+        ),
+        "Decision Tree": DecisionTreeClassifier(
+            class_weight="balanced", max_depth=8, random_state=42
+        ),
+        "Random Forest": RandomForestClassifier(
+            class_weight="balanced",
+            n_estimators=200,
+            max_depth=12,
+            random_state=42,
+            n_jobs=-1,
+        ),
+    }
+    if XGBClassifier is not None:
+        model_defs["XGBoost"] = XGBClassifier(
+            objective="multi:softprob",
+            eval_metric="mlogloss",
+            n_estimators=200,
+            max_depth=5,
+            learning_rate=0.08,
+            random_state=42,
+            n_jobs=-1,
+        )
 
-# -------------------------------------------------------------
-# 6. FEATURE IMPORTANCE RANKINGS
-# -------------------------------------------------------------
-print("\n[Step 7] Extracting Feature Importance...")
+    return {
+        name: Pipeline(steps=[("preprocess", preprocessor), ("model", model)])
+        for name, model in model_defs.items()
+    }
 
-# Use the best model if tree-based, otherwise fallback to Random Forest for clean importance extraction
-importance_model_name = best_model_name
-importance_model = best_model_obj
 
-if importance_model_name not in ["Random Forest", "XGBoost", "Decision Tree"]:
-    # Fallback to Random Forest for feature importance visualization
-    importance_model_name = "Random Forest"
-    importance_model = models["Random Forest"]
+def feature_importance(best_pipeline: Pipeline, feature_names: list[str]) -> pd.DataFrame:
+    model = best_pipeline.named_steps["model"]
+    preprocessor = best_pipeline.named_steps["preprocess"]
+    transformed_names = preprocessor.get_feature_names_out()
 
-importances = importance_model.feature_importances_
-indices = np.argsort(importances)[::-1]
-sorted_features = [feature_cols[i] for i in indices]
-sorted_importances = importances[indices]
+    if hasattr(model, "feature_importances_"):
+        values = model.feature_importances_
+    elif hasattr(model, "coef_"):
+        values = np.mean(np.abs(model.coef_), axis=0)
+    else:
+        return pd.DataFrame(columns=["feature", "importance"])
 
-# Plot feature importance
-plt.figure(figsize=(10, 6))
-sns.barplot(x=sorted_importances, y=sorted_features, palette="viridis")
-plt.title(f"Feature Importance Ranking ({importance_model_name})", fontsize=15, fontweight='bold', pad=15, color='#1e293b')
-plt.xlabel("Relative Importance Score", fontsize=12)
-plt.ylabel("Features", fontsize=12)
-plt.tight_layout()
-feat_plot_path = os.path.join(data_dir, "model_feature_importances.png")
-plt.savefig(feat_plot_path, dpi=300)
-plt.close()
-print(f"Saved feature importances plot to '{feat_plot_path}'")
+    importance = pd.DataFrame({"feature": transformed_names, "importance": values})
+    importance["source_feature"] = importance["feature"].str.replace(r"^(num|cat)__", "", regex=True)
+    importance["source_feature"] = importance["source_feature"].str.split("_").str[0]
+    return importance.sort_values("importance", ascending=False)
 
-print("\n--- Feature Importance Table ---")
-for i in range(len(sorted_features)):
-    print(f"{i+1}. {sorted_features[i]:<30} : {sorted_importances[i]:.4f}")
 
-# -------------------------------------------------------------
-# 7. TEMPERATURE & HUMIDITY CONTRIBUTION EXPLANATION
-# -------------------------------------------------------------
-print("\n[Step 8] Analyzing Environmental Feature Contributions...")
+def train() -> None:
+    if not DATA_PATH.exists():
+        raise FileNotFoundError(f"Dataset not found: {DATA_PATH}")
 
-explanation_text = """
-================================-----------------================================
-ENVIRONMENTAL ROLE ANALYSIS: TEMPERATURE AND HUMIDITY CONTRIBUTION TO RISK
-================================-----------------================================
+    raw_df = pd.read_csv(DATA_PATH)
+    print(f"Loaded {DATA_PATH.name}: {raw_df.shape[0]} rows x {raw_df.shape[1]} columns")
+    print("Columns:", list(raw_df.columns))
+    print("Dtypes:")
+    print(raw_df.dtypes)
+    print("Missing values (%):")
+    print((raw_df.isna().mean() * 100).round(3))
+    print(f"Duplicate records: {raw_df.duplicated().sum()}")
 
-Based on our biological model rules and the resulting trained Machine Learning models:
+    analysis = inspect_dataset(raw_df)
+    analysis.to_csv(ANALYSIS_PATH, index=False)
+    print("\nDataset analysis:")
+    print(analysis.to_string(index=False))
 
-1. TEMPERATURE CONTRIBUTION:
-   - Poultry, particularly broiler and laying chickens, have a tight thermoneutral zone (typically between 18°C and 24°C).
-   - High temperatures (>30°C to 32°C) trigger severe HEAT STRESS. To cool off, birds pant, which increases respiratory rates and makes their mucous membranes dry and highly vulnerable to viral pathogens (e.g., Newcastle Disease, Infectious Bronchitis, Avian Influenza).
-   - In our model, extreme high temperatures (>34°C) combined with 'Unvaccinated' status immediately flag a 'Medium' to 'High' risk environment.
-   - Low temperatures (<14°C) trigger cold stress, where chicks crowd together to conserve heat. Crowding dramatically increases the contact rate between birds, accelerating pathogen transmission and boosting the disease outbreak risk.
+    df, metadata = build_training_frame(raw_df)
+    features = [c for c in REQUIRED_CONCEPTS if c in df.columns]
+    numeric_features = [c for c in features if c != "Vaccination_Status"]
+    categorical_features = [c for c in features if c == "Vaccination_Status"]
 
-2. HUMIDITY CONTRIBUTION:
-   - High relative humidity (>80%) restricts the bird's ability to dissipate heat through evaporative cooling (panting), vastly multiplying heat stress and causing heat stroke or respiratory arrest.
-   - High humidity combined with warm conditions also creates a breeding ground for litter-borne pathogens (like Salmonella and Coccidiosis) and elevates toxic ammonia levels from feces.
-   - Low humidity (<40%) makes the poultry house dry and dusty, causing mechanical irritation in the respiratory tracts of active birds, leading to viral infections.
+    X = df[features]
+    y_labels = df[TARGET_COL]
+    y = y_labels.map(CLASS_MAPPING)
 
-3. COMBINED IMPACT (HI OR THI):
-   - The interactions between Temperature and Humidity are multiplicative: a moderate temperature of 30°C at 50% humidity is manageable, but at 85% humidity it becomes LETHAL.
-   - This multiplicative relationship is why non-linear, tree-based models like XGBoost and Random Forest easily outperform linear models like Logistic Regression in this biosecurity domain.
-"""
-print(explanation_text)
+    print("\nClass distribution before preprocessing:")
+    print(y_labels.value_counts(normalize=False).reindex(RISK_ORDER, fill_value=0))
+    print(y_labels.value_counts(normalize=True).reindex(RISK_ORDER, fill_value=0).round(4))
 
-# Save explanation to a text file
-explanation_path = os.path.join(data_dir, "environmental_impact_analysis.txt")
-with open(explanation_path, "w", encoding='utf-8') as f:
-    f.write(explanation_text)
-print(f"Saved scientific explanation writeup to '{explanation_path}'")
+    stratify = y if y.value_counts().min() >= 2 else None
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.20,
+        random_state=42,
+        stratify=stratify,
+    )
 
-# -------------------------------------------------------------
-# 8. SAVE TRAINED MODEL & PREPROCESSOR
-# -------------------------------------------------------------
-print("\n[Step 9] Saving Best Model and Preprocessor...")
+    print("\nClass distribution after split:")
+    print("Train:")
+    print(y_train.map(INV_CLASS_MAPPING).value_counts().reindex(RISK_ORDER, fill_value=0))
+    print("Test:")
+    print(y_test.map(INV_CLASS_MAPPING).value_counts().reindex(RISK_ORDER, fill_value=0))
 
-# Package model, scaler, feature columns, and target mapping together in a single dict
-pickle_payload = {
-    "model_name": best_model_name,
-    "model": best_model_obj,
-    "scaler": scaler,
-    "numeric_cols": numeric_cols,
-    "feature_cols": feature_cols,
-    "risk_map": risk_map,
-    "inv_risk_map": inv_risk_map
-}
+    models = build_models(numeric_features, categorical_features)
+    comparison_rows = []
+    reports = {}
+    trained_models = {}
 
-with open(output_model_path, "wb") as f:
-    pickle.dump(pickle_payload, f)
-print(f"Successfully saved packaged model dictionary to '{output_model_path}' using pickle.")
+    for name, pipeline in models.items():
+        print(f"\nTraining {name}...")
+        fit_kwargs = {}
+        if name == "XGBoost":
+            fit_kwargs["model__sample_weight"] = compute_sample_weight(
+                class_weight="balanced", y=y_train
+            )
+        pipeline.fit(X_train, y_train, **fit_kwargs)
+        y_pred = pipeline.predict(X_test)
 
-print("\n=================================================================")
-print("  POULTRY BIOSECURITY DISEASE OUTBREAK RISK ML PIPELINE COMPLETE!")
-print("=================================================================")
+        precision_w, recall_w, f1_w, _ = precision_recall_fscore_support(
+            y_test, y_pred, average="weighted", zero_division=0
+        )
+        precision_macro, recall_macro, _, _ = precision_recall_fscore_support(
+            y_test, y_pred, average="macro", zero_division=0
+        )
+
+        comparison_rows.append(
+            {
+                "Model": name,
+                "Accuracy": accuracy_score(y_test, y_pred),
+                "Balanced Accuracy": balanced_accuracy_score(y_test, y_pred),
+                "Precision": precision_w,
+                "Recall": recall_w,
+                "F1 Score": f1_w,
+                "Macro Precision": precision_macro,
+                "Macro Recall": recall_macro,
+                "Macro F1": f1_score(y_test, y_pred, average="macro"),
+            }
+        )
+        reports[name] = {
+            "confusion_matrix": confusion_matrix(y_test, y_pred).tolist(),
+            "classification_report": classification_report(
+                y_test,
+                y_pred,
+                target_names=RISK_ORDER,
+                zero_division=0,
+                output_dict=True,
+            ),
+        }
+        trained_models[name] = pipeline
+
+    comparison = pd.DataFrame(comparison_rows).sort_values(
+        ["Macro F1", "Balanced Accuracy"], ascending=False
+    )
+    comparison.to_csv(MODEL_REPORT_PATH, index=False)
+    best_name = comparison.iloc[0]["Model"]
+    best_pipeline = trained_models[best_name]
+
+    print("\nModel comparison:")
+    print(comparison.to_string(index=False))
+    print(f"\nBest model by Macro F1: {best_name}")
+    print("Confusion matrix:")
+    print(np.array(reports[best_name]["confusion_matrix"]))
+    print("Classification report:")
+    print(
+        classification_report(
+            y_test,
+            best_pipeline.predict(X_test),
+            target_names=RISK_ORDER,
+            zero_division=0,
+        )
+    )
+
+    importance = feature_importance(best_pipeline, features)
+    print("\nFeature importance:")
+    print(importance.head(30).to_string(index=False))
+
+    watched_features = [
+        "Temperature",
+        "Humidity",
+        "Mortality_Rate",
+        "Egg_Production",
+        "Amount_of_Feeding",
+        "Bird_Age",
+        "Active_Birds",
+        "Vaccination_Status",
+    ]
+    watched_importance = {}
+    for feature in watched_features:
+        if importance.empty:
+            watched_importance[feature] = None
+        else:
+            mask = importance["feature"].str.contains(feature, regex=False)
+            watched_importance[feature] = float(importance.loc[mask, "importance"].sum())
+
+    payload = {
+        "pipeline": best_pipeline,
+        "model_name": best_name,
+        "feature_list": features,
+        "numeric_features": numeric_features,
+        "categorical_features": categorical_features,
+        "class_mapping": CLASS_MAPPING,
+        "inverse_class_mapping": INV_CLASS_MAPPING,
+        "metadata": {
+            **metadata,
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            "target_column": TARGET_COL,
+            "risk_score_definition": "1 - P(Low)",
+            "best_model_selection": "Highest Macro F1, balanced accuracy as tie-breaker.",
+            "feature_importance": watched_importance,
+            "important_warning": (
+                "This model estimates biosecurity risk from available records. "
+                "It is not a veterinary diagnosis, and environmental values are risk indicators only."
+            ),
+        },
+        "evaluation": {
+            "model_comparison": comparison.to_dict(orient="records"),
+            "reports": reports,
+        },
+    }
+    joblib.dump(payload, MODEL_PATH)
+    print(f"\nSaved model artifact: {MODEL_PATH}")
+    print("Saved dataset analysis:", ANALYSIS_PATH)
+    print("Saved model report:", MODEL_REPORT_PATH)
+    print("\nMetadata:")
+    print(json.dumps(payload["metadata"], indent=2))
+
+
+if __name__ == "__main__":
+    train()

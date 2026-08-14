@@ -27,10 +27,21 @@ export default function Login() {
         localStorage.setItem("token", result.data.token);
         localStorage.setItem("role", result.data.role);
         localStorage.setItem("email", email);
+        localStorage.setItem("user", JSON.stringify(result.data));
+
+        sessionStorage.setItem("token", result.data.token);
+        sessionStorage.setItem("role", result.data.role);
+        sessionStorage.setItem("user", JSON.stringify(result.data));
+        sessionStorage.setItem("email", email);
+        if (result.data.role === "Farmer") {
+          sessionStorage.setItem("farmer_id", result.data.id);
+        }
 
         toast.success("Login successful");
 
-        if (result.data.role === "Farmer") navigate("/farmer/dashboard");
+        if (result.data.role === "Farmer") {
+          navigate(result.data.profile_completed ? "/farmer/dashboard" : "/farmer/complete-profile");
+        }
         else if (result.data.role === "Veterinarian") navigate("/vet/dashboard");
         else if (result.data.role === "Vendor") navigate("/vendor/dashboard");
         else navigate("/admin/dashboard");

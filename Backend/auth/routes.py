@@ -8,7 +8,7 @@ from utlis.db_utlis import executeQuery
 auth_bp = Blueprint("auth", __name__)
 
 @auth_bp.route("/login", methods=["POST"])
-@auth_bp.route("/login", methods=["POST"])
+
 def login():
 
     data = request.get_json()
@@ -76,6 +76,8 @@ def login():
         result = executeQuery(query, (email,))
 
     # VENDOR
+    print("EMAIL:", email)
+    print("RESULT:", result)
 
     if len(result) == 0:
 
@@ -107,7 +109,7 @@ def login():
         password,
         user["password_hash"]
     )
-
+    print("VERIFY:", success)
     if not success:
         return createResult(
             "Invalid Email or Password",
@@ -294,14 +296,9 @@ def register_vendor():
 
     required_fields = [
         "full_name",
-        "business_name",
         "email",
         "phone_number",
-        "password",
-        "vendor_type",
-        "address",
-        "latitude",
-        "longitude"
+        "password"
     ]
 
     for field in required_fields:
@@ -321,7 +318,7 @@ def register_vendor():
         query,
         (data["email"],)
     )
-
+    
     if result:
         return createResult(
             "Email already registered",
@@ -336,34 +333,25 @@ def register_vendor():
         INSERT INTO Vendors
         (
             full_name,
-            business_name,
             email,
             phone_number,
-            password_hash,
-            vendor_type,
-            address,
-            latitude,
-            longitude
+            password_hash
         )
         VALUES
-        (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        (%s,%s,%s,%s)
     """
 
     params = (
         data["full_name"],
-        data["business_name"],
         data["email"],
         data["phone_number"],
-        password_hash,
-        data["vendor_type"],
-        data["address"],
-        data["latitude"],
-        data["longitude"]
+        password_hash
     )
-
+    print("REGISTER DATA =", data)
     executeQuery(query, params)
 
     return createResult(
         None,
         "Vendor Registered Successfully"
     )
+   

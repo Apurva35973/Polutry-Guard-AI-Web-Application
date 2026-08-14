@@ -10,7 +10,7 @@ CREATE TABLE Farmers (
     phone_number VARCHAR(15) UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     farm_name VARCHAR(150),
-    farm_type ENUM('Broiler','Layer','Breeder') NOT NULL,
+    farm_type ENUM('Broiler','Layer','Breeder'),
     address TEXT,
     latitude DECIMAL(10,8),
     longitude DECIMAL(11,8),
@@ -297,3 +297,11 @@ CREATE TABLE Vendor_Trips (
     REFERENCES Transport_Requests(request_id)
     ON DELETE CASCADE
 );
+SELECT * FROM Vendors;
+
+UPDATE Admins
+SET password_hash='$5$rounds=535000$V0WA6wh/.C/n3I4l$4AHhKeXAjazZ8MJHzOw2nUh5T9Hf0Ukw69WHZp1SEVA'
+WHERE admin_id=1;
+SELECT * FROM Admins;
+
+DELETE FROM  Farmers;

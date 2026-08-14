@@ -1,0 +1,22 @@
+{
+  "image_model": {
+    "name": "ResNet18",
+    "type": "PyTorch image classifier",
+    "purpose": "image-based disease classification",
+    "artifact_expected": "ml/models/image/best.pt",
+    "checkpoint_format": "state_dict or checkpoint containing model_state_dict",
+    "classes": ["Coccidiosis", "Healthy", "Newcastle Disease", "Salmonella"],
+    "training_notebook_label": "New Castle Disease",
+    "preprocessing": {"resize": [224, 224], "normalize_mean": [0.485, 0.456, 0.406], "normalize_std": [0.229, 0.224, 0.225]},
+    "status": "checkpoint not present in this workspace; metadata inferred from pytorch-resnet18.ipynb"
+  },
+  "environmental_model": {
+    "artifact": "poultry_guard_risk_pipeline.joblib",
+    "actual_estimator": "RandomForestClassifier",
+    "purpose": "biosecurity/environmental risk estimation",
+    "classes": ["Low", "Medium", "High"],
+    "features": ["Temperature", "Humidity", "Mortality_Rate", "Egg_Production", "Amount_of_Feeding"],
+    "risk_score": "1 - P(Low)",
+    "ammonia_supported": false
+  }
+}

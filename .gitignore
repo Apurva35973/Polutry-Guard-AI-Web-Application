@@ -1,4 +1,10 @@
 Firebase-credentials.json
+.env
 __pycache__/
 *.pyc
 .venv/
+ml/models/image/*.pt
+ml/models/image/*.pth
+ml/models/**/*.onnx
+ml/datasets/
+ml/**/__pycache__/

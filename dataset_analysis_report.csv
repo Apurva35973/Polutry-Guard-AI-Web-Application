@@ -1,0 +1,14 @@
+Column,Present?,Missing %,Data Type,Possible Use
+Temperature,Yes,0.0,float64,Environmental stress indicator; validate in Celsius.
+Humidity,Yes,0.0,float64,Environmental stress indicator; normalize fraction/percent units.
+Mortality_Rate,Yes,0.0,float64,Direct flock-health signal and strongest proxy-label input.
+Egg_Production,Yes,0.0,int64,Production drop indicator; useful for risk prediction.
+Amount_of_Feeding,Yes,0.0,float64,Feed intake proxy; useful for risk prediction.
+Active_Birds,No,100.0,absent,Absent; collect from farm records/web app. Cannot be derived reliably.
+Bird_Age,No,100.0,absent,Absent; collect per flock cycle. Cannot be derived reliably.
+Vaccination_Status,No,100.0,absent,Absent; collect manually or from vaccination records.
+Risk_Level,No,100.0,absent,Not available as a target
+Disease,No,100.0,absent,Not available as a target
+Disease_Label,No,100.0,absent,Not available as a target
+Outbreak,No,100.0,absent,Not available as a target
+Health_Status,No,100.0,absent,Not available as a target

@@ -112,6 +112,35 @@
   color: #ffffff !important;
 }
 
+.nearby-farmer-marker {
+  position: relative;
+}
+
+.nearby-farmer-marker__pin {
+  width: 22px;
+  height: 22px;
+  display: block;
+  position: relative;
+  border: 3px solid #ecfdf5;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow:
+    0 0 0 4px rgba(16, 185, 129, 0.25),
+    0 8px 16px rgba(0, 0, 0, 0.3);
+}
+
+.nearby-farmer-marker__pin::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: #064e3b;
+}
+
 /* Pulse animation for outbreak status markers */
 @keyframes pulse {
   0% {

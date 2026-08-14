@@ -1,6 +1,12 @@
+from pathlib import Path
+
 from flask import Flask
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
+from dotenv import load_dotenv
+
+# Load the project-local secret configuration before any service reads it.
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from utlis.response import createResult
 
@@ -12,6 +18,7 @@ from Vendor.routes import vendor_bp
 from Devices.routes import device_bp
 from Disease.routes import disease_bp
 from Alerts.routes import alert_bp
+from Environment.routes import environment_bp
 
 import os
 
@@ -72,6 +79,8 @@ def create_app():
     app.register_blueprint(alert_bp, url_prefix="/alerts")
 
     app.register_blueprint(vendor_bp,url_prefix="/vendor")
+
+    app.register_blueprint(environment_bp, url_prefix="/api")
 
     # JWT Error Handlers
 

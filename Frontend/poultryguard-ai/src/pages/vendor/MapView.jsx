@@ -14,7 +14,10 @@ import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import { Link } from "react-router-dom";
 import { AlertTriangle } from "lucide-react";
 import LoadingSpinner from "../../components/vendor/LoadingSpinner";
-import { getNearbyFarms, getOutbreakAlerts } from "../../services/vendorService";
+import {
+  getNearbyFarms,
+  getOutbreakAlerts,
+} from "../../services/vendorService";
 import { calculateDistance } from "../../utils/haversine";
 
 L.Icon.Default.mergeOptions({
@@ -31,6 +34,14 @@ const vendorIcon = new L.Icon({
   iconAnchor: [12, 41],
   popupAnchor: [1, -34],
   shadowSize: [41, 41],
+});
+
+const farmerIcon = L.divIcon({
+  className: "nearby-farmer-marker",
+  html: '<span class="nearby-farmer-marker__pin"></span>',
+  iconSize: [28, 28],
+  iconAnchor: [14, 14],
+  popupAnchor: [0, -14],
 });
 
 const isValidCoordinate = (lat, lng) =>
@@ -55,9 +66,12 @@ export default function MapView() {
         ]);
 
         const location = farmData?.vendor_location || null;
-        const farmRows = Array.isArray(farmData?.farms) ? farmData.farms : [];
+        const farmRows = Array.isArray(farmData?.farms)
+          ? farmData.farms
+          : [];
 
         setVendorLocation(location);
+
         setFarms(
           farmRows.map((farm) => ({
             ...farm,
@@ -69,6 +83,7 @@ export default function MapView() {
             ),
           }))
         );
+
         setOutbreaks(Array.isArray(outbreakData) ? outbreakData : []);
       } catch (err) {
         setError(err.message || "Unable to load map data.");
@@ -81,23 +96,42 @@ export default function MapView() {
   }, []);
 
   const center = useMemo(() => {
-    if (isValidCoordinate(vendorLocation?.latitude, vendorLocation?.longitude)) {
-      return [Number(vendorLocation.latitude), Number(vendorLocation.longitude)];
+    if (
+      isValidCoordinate(
+        vendorLocation?.latitude,
+        vendorLocation?.longitude
+      )
+    ) {
+      return [
+        Number(vendorLocation.latitude),
+        Number(vendorLocation.longitude),
+      ];
     }
 
-    const firstFarm = farms.find((farm) => isValidCoordinate(farm.latitude, farm.longitude));
-    if (firstFarm) return [Number(firstFarm.latitude), Number(firstFarm.longitude)];
+    const firstFarm = farms.find((farm) =>
+      isValidCoordinate(farm.latitude, farm.longitude)
+    );
+
+    if (firstFarm) {
+      return [Number(firstFarm.latitude), Number(firstFarm.longitude)];
+    }
 
     return [18.5204, 73.8567];
   }, [farms, vendorLocation]);
 
   const sourceFarmById = useMemo(() => {
     const map = new Map();
-    farms.forEach((farm) => map.set(Number(farm.farmer_id), farm));
+
+    farms.forEach((farm) => {
+      map.set(Number(farm.farmer_id), farm);
+    });
+
     return map;
   }, [farms]);
 
-  if (loading) return <LoadingSpinner message="Preparing map view..." />;
+  if (loading) {
+    return <LoadingSpinner message="Preparing map view..." />;
+  }
 
   const hasVendorLocation = isValidCoordinate(
     vendorLocation?.latitude,
@@ -107,19 +141,30 @@ export default function MapView() {
   return (
     <div className="space-y-6">
       <section>
-        <p className="text-sm font-bold uppercase text-emerald-300">Geospatial</p>
-        <h2 className="mt-2 text-3xl font-black text-white">Map View</h2>
+        <p className="text-sm font-bold uppercase text-emerald-300">
+          Geospatial
+        </p>
+
+        <h2 className="mt-2 text-3xl font-black text-white">
+          Map View
+        </h2>
+
         <p className="mt-2 text-sm text-slate-400">
-          View vendor location, nearby farm markers, and active outbreak zones.
+          View vendor location, nearby farmer markers, and active outbreak
+          zones.
         </p>
       </section>
 
       {!hasVendorLocation && (
         <div className="flex gap-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-4 text-sm text-yellow-100">
           <AlertTriangle className="shrink-0" size={18} />
+
           <span>
             Vendor GPS location is missing. Update coordinates in{" "}
-            <Link className="font-bold underline" to="/vendor/profile">
+            <Link
+              className="font-bold underline"
+              to="/vendor/profile"
+            >
               Profile
             </Link>
             .
@@ -136,12 +181,12 @@ export default function MapView() {
       <section className="h-[620px] overflow-hidden rounded-lg border border-emerald-900/30 bg-white/[0.04]">
         <MapContainer
           center={center}
-          className="h-full w-full"
-          scrollWheelZoom
           zoom={12}
+          scrollWheelZoom
+          className="h-full w-full"
         >
           <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            attribution="&copy; OpenStreetMap contributors"
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
@@ -150,55 +195,108 @@ export default function MapView() {
               <Popup>
                 <strong>Vendor Location</strong>
                 <br />
-                {Number(vendorLocation.latitude).toFixed(5)},{" "}
+                {Number(vendorLocation.latitude).toFixed(5)},
+                {" "}
                 {Number(vendorLocation.longitude).toFixed(5)}
               </Popup>
             </Marker>
           )}
 
           {farms.map((farm) => {
-            if (!isValidCoordinate(farm.latitude, farm.longitude)) return null;
+            if (
+              !isValidCoordinate(
+                farm.latitude,
+                farm.longitude
+              )
+            ) {
+              return null;
+            }
 
             return (
               <Marker
                 key={farm.farmer_id}
-                position={[Number(farm.latitude), Number(farm.longitude)]}
+                icon={farmerIcon}
+                position={[
+                  Number(farm.latitude),
+                  Number(farm.longitude),
+                ]}
               >
                 <Popup>
-                  <strong>{farm.farm_name || "Farm"}</strong>
+                  <strong>
+                    {farm.full_name ||
+                      farm.owner_name ||
+                      "Nearby Farmer"}
+                  </strong>
+
+                  <br />
+                  Farm: {farm.farm_name || "Unnamed Farm"}
+
                   <br />
                   Farm Type: {farm.farm_type || "N/A"}
+
                   <br />
-                  Bird Count: {Number(farm.total_birds || 0).toLocaleString()}
+                  Bird Count:{" "}
+                  {Number(
+                    farm.total_birds || 0
+                  ).toLocaleString()}
+
                   <br />
-                  Distance: {Number.isFinite(farm.distance) ? `${farm.distance} KM` : "N/A"}
+                  Distance:{" "}
+                  {Number.isFinite(farm.distance)
+                    ? `${farm.distance} KM`
+                    : "N/A"}
+
+                  <br />
+                  Location:{" "}
+                  {Number(farm.latitude).toFixed(5)},
+                  {" "}
+                  {Number(farm.longitude).toFixed(5)}
                 </Popup>
               </Marker>
             );
           })}
 
           {outbreaks.map((outbreak) => {
-            const sourceFarm = sourceFarmById.get(Number(outbreak.source_farm_id));
-            if (!sourceFarm || !isValidCoordinate(sourceFarm.latitude, sourceFarm.longitude)) {
+            const sourceFarm = sourceFarmById.get(
+              Number(outbreak.source_farm_id)
+            );
+
+            if (
+              !sourceFarm ||
+              !isValidCoordinate(
+                sourceFarm.latitude,
+                sourceFarm.longitude
+              )
+            ) {
               return null;
             }
 
             return (
               <Circle
-                center={[Number(sourceFarm.latitude), Number(sourceFarm.longitude)]}
                 key={outbreak.outbreak_id}
+                center={[
+                  Number(sourceFarm.latitude),
+                  Number(sourceFarm.longitude),
+                ]}
+                radius={
+                  Number(outbreak.radius_km || 0) * 1000
+                }
                 pathOptions={{
                   color: "#ef4444",
                   fillColor: "#ef4444",
                   fillOpacity: 0.16,
                   weight: 2,
                 }}
-                radius={Number(outbreak.radius_km || 0) * 1000}
               >
                 <Popup>
-                  <strong>{outbreak.disease_name || "Outbreak Zone"}</strong>
+                  <strong>
+                    {outbreak.disease_name ||
+                      "Outbreak Zone"}
+                  </strong>
+
                   <br />
                   Radius: {outbreak.radius_km || 0} KM
+
                   <br />
                   Status: {outbreak.status || "Unknown"}
                 </Popup>
