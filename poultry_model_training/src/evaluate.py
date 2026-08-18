@@ -68,8 +68,8 @@ def evaluate_model(config_path="../training_config.json", model_path="../models/
     
     # Metrics
     acc = accuracy_score(all_labels, all_preds)
-    precision, recall, f1, _ = precision_recall_fscore_support(all_labels, all_preds, average=None)
-    macro_precision, macro_recall, macro_f1, _ = precision_recall_fscore_support(all_labels, all_preds, average='macro')
+    precision, recall, f1, _ = precision_recall_fscore_support(all_labels, all_preds, average=None, zero_division=0)
+    macro_precision, macro_recall, macro_f1, _ = precision_recall_fscore_support(all_labels, all_preds, average='macro', zero_division=0)
     
     print("\nOverall Metrics:")
     print(f"Accuracy:        {acc:.4f}")
@@ -145,7 +145,7 @@ def evaluate_model(config_path="../training_config.json", model_path="../models/
     # Find most confused pair
     np.fill_diagonal(cm, 0)
     most_confused = np.unravel_index(np.argmax(cm, axis=None), cm.shape)
-    print(f"Most confused pair of classes: {class_names[most_confused[0]]} ↔ {class_names[most_confused[1]]}")
+    print(f"Most confused pair of classes: {class_names[most_confused[0]]} <-> {class_names[most_confused[1]]}")
     print("Note: This does not automatically mean the diseases are biologically similar; it means the current image model has difficulty distinguishing their available visual patterns.")
 
     print("\n==================================================")

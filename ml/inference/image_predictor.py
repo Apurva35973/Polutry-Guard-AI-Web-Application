@@ -11,6 +11,7 @@ NORMALIZE_MEAN = (0.485, 0.456, 0.406)
 NORMALIZE_STD = (0.229, 0.224, 0.225)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CHECKPOINT_PATHS = (
+    PROJECT_ROOT / "poultry_model_training" / "models" / "best_resnet18_poultry.pth",
     PROJECT_ROOT / "ml" / "models" / "image" / "best.pt",
     PROJECT_ROOT / "resnet18" / "best.pt",
 )
@@ -25,27 +26,39 @@ def image_model_path() -> Path:
         if candidate.exists():
             return candidate
     raise ImageModelUnavailable(
-        "ResNet18 checkpoint not found. The training notebook references resnet18/best.pt; "
-        "place the existing checkpoint at ml/models/image/best.pt (preferred) or resnet18/best.pt."
+        "ResNet18 checkpoint not found. Looked in poultry_model_training/models/best_resnet18_poultry.pth, "
+        "ml/models/image/best.pt, and resnet18/best.pt."
     )
 
 
 @lru_cache(maxsize=1)
-def load_image_model() -> Any:
+def load_image_model() -> tuple[Any, list[str]]:
     try:
         import torch
         from torchvision.models import resnet18
     except ImportError as exc:
         raise RuntimeError("PyTorch and torchvision are required for image inference.") from exc
     checkpoint = torch.load(image_model_path(), map_location="cpu", weights_only=False)
-    state_dict = checkpoint.get("model_state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
+    if isinstance(checkpoint, dict):
+        state_dict = checkpoint.get("state_dict", checkpoint.get("model_state_dict", checkpoint))
+        class_mapping = checkpoint.get("class_mapping", None)
+        if isinstance(class_mapping, dict):
+            labels = list(class_mapping.keys())
+        elif isinstance(checkpoint.get("classes"), (list, tuple)):
+            labels = list(checkpoint["classes"])
+        else:
+            labels = list(IMAGE_LABELS)
+    else:
+        state_dict = checkpoint
+        labels = list(IMAGE_LABELS)
+    
     if not isinstance(state_dict, dict):
         raise ValueError("Unsupported ResNet18 checkpoint format; expected a state_dict or checkpoint dict.")
     model = resnet18(weights=None)
-    model.fc = torch.nn.Linear(model.fc.in_features, len(IMAGE_LABELS))
+    model.fc = torch.nn.Linear(model.fc.in_features, len(labels))
     model.load_state_dict(state_dict)
     model.eval()
-    return model
+    return model, labels
 
 
 def predict_image(image_input: str | Path | BinaryIO) -> dict[str, Any]:
@@ -79,9 +92,9 @@ def predict_image(image_input: str | Path | BinaryIO) -> dict[str, Any]:
             tensor = transform(image).unsqueeze(0)
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise ValueError("Invalid image input. Upload a readable image file.") from exc
-    model = load_image_model()
+    model, labels = load_image_model()
     with torch.no_grad():
         probabilities = torch.softmax(model(tensor), dim=1)[0].cpu().tolist()
-    probability_map = {label: float(value) for label, value in zip(IMAGE_LABELS, probabilities)}
+    probability_map = {label: float(value) for label, value in zip(labels, probabilities)}
     label = max(probability_map, key=probability_map.get)
     return {"model": "ResNet18", "predicted_disease": label, "confidence": probability_map[label], "probabilities": probability_map}

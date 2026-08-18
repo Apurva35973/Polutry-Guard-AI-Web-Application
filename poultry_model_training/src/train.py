@@ -6,12 +6,13 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import pandas as pd
 from sklearn.metrics import f1_score
+from tqdm import tqdm
 from dataset import create_dataloaders
 from model import get_resnet18_model, freeze_backbone, unfreeze_backbone
 
 CONFIG = {
     "image_size": 224,
-    "batch_size": 32,
+    "batch_size": 64,
     "epochs": 20,
     "learning_rate": 1e-3,
     "weight_decay": 1e-4,
@@ -48,22 +49,40 @@ def save_config(config, path="../training_config.json"):
 def train_epoch(model, dataloader, criterion, optimizer, device):
     model.train()
     running_loss = 0.0
+    
     correct = 0
     total = 0
+    pbar = tqdm(dataloader, desc="  Train Batch", leave=False, dynamic_ncols=True)
     
-    for inputs, labels in dataloader:
+    for inputs, labels in pbar:
         inputs, labels = inputs.to(device), labels.to(device)
-        
+
         optimizer.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
-        
+        # Use AMP when available for faster mixed-precision training
+        if device.type == 'cuda':
+            with torch.amp.autocast('cuda'):
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+            scaler = getattr(optimizer, 'amp_scaler', None)
+            if scaler is not None:
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                optimizer.step()
+        else:
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
         running_loss += loss.item() * inputs.size(0)
         _, predicted = outputs.max(1)
         total += labels.size(0)
         correct += predicted.eq(labels).sum().item()
+        
+        pbar.set_postfix({'loss': f"{running_loss / total:.4f}", 'acc': f"{correct / total:.4f}"})
         
     epoch_loss = running_loss / total
     epoch_acc = correct / total
@@ -77,23 +96,29 @@ def validate_epoch(model, dataloader, criterion, device):
     all_preds = []
     all_labels = []
     
+    pbar = tqdm(dataloader, desc="  Val Batch  ", leave=False, dynamic_ncols=True)
     with torch.no_grad():
-        for inputs, labels in dataloader:
+        for inputs, labels in pbar:
             inputs, labels = inputs.to(device), labels.to(device)
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            
+            if device.type == 'cuda':
+                with torch.amp.autocast('cuda'):
+                    outputs = model(inputs)
+                    loss = criterion(outputs, labels)
+            else:
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+
             running_loss += loss.item() * inputs.size(0)
             _, predicted = outputs.max(1)
             total += labels.size(0)
             correct += predicted.eq(labels).sum().item()
-            
+
             all_preds.extend(predicted.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
             
     epoch_loss = running_loss / total
     epoch_acc = correct / total
-    epoch_macro_f1 = f1_score(all_labels, all_preds, average='macro')
+    epoch_macro_f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
     
     return epoch_loss, epoch_acc, epoch_macro_f1
 
@@ -103,6 +128,20 @@ def train_model(config):
     print("==================================================")
     set_seed(config["seed"])
     device = get_device()
+    # Limit CPU threads to reduce system load on laptops
+    try:
+        torch.set_num_threads(min(4, os.cpu_count() or 1))
+    except Exception:
+        pass
+    # Enable cudnn benchmark for improved performance on fixed-size inputs
+    if device.type == 'cuda':
+        torch.backends.cudnn.benchmark = True
+        # attach GradScaler to optimizer for AMP use
+        scaler = torch.amp.GradScaler('cuda')
+        # store scaler on optimizer for access in train_epoch
+        # we create a simple attribute; it's not standard but works here
+    else:
+        scaler = None
     save_config(config)
     
     print("\nInitializing DataLoaders...")
@@ -126,12 +165,39 @@ def train_model(config):
     patience_counter = 0
     history = []
     
+    # Load previous history if available
+    if os.path.exists("training_history.csv"):
+        try:
+            prev_df = pd.read_csv("training_history.csv")
+            history = prev_df.to_dict('records')
+            print(f"Loaded {len(history)} previous epochs from training_history.csv")
+        except Exception as e:
+            history = []
+    
     # Prepare directories
     os.makedirs("../models", exist_ok=True)
     best_model_path = "../models/best_resnet18_poultry.pth"
+    # Resume variables
+    start_epoch = 0
+    # If checkpoint exists, load model state and resume epoch/best metric
+    if os.path.exists(best_model_path):
+        try:
+            chk = torch.load(best_model_path, map_location='cpu')
+            model.load_state_dict(chk['state_dict'])
+            best_macro_f1 = chk.get('best_macro_f1', best_macro_f1)
+            start_epoch = chk.get('epoch', 0)
+            print(f"Resuming from checkpoint at epoch {start_epoch} with best F1: {best_macro_f1:.4f}")
+            # If start_epoch is within history, keep history up to start_epoch
+            if history:
+                history = [h for h in history if h.get('epoch', 0) <= start_epoch]
+        except Exception as e:
+            print(f"Warning: could not load checkpoint for resume: {e}")
     
     print("\nStarting Phase 1: Training Classifier...")
-    for epoch in range(config["epochs"]):
+    for epoch in range(start_epoch, config["epochs"]):
+        # attach scaler to optimizer so train_epoch can access it
+        if scaler is not None:
+            setattr(optimizer, 'amp_scaler', scaler)
         train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_acc, val_macro_f1 = validate_epoch(model, val_loader, criterion, device)
         
@@ -142,6 +208,7 @@ def train_model(config):
         scheduler.step(val_macro_f1)
         history.append({'epoch': epoch+1, 'train_loss': train_loss, 'val_loss': val_loss, 
                         'train_acc': train_acc, 'val_acc': val_acc, 'val_f1': val_macro_f1, 'lr': optimizer.param_groups[0]['lr']})
+        pd.DataFrame(history).to_csv("training_history.csv", index=False)
         
         # Early Stopping & Checkpointing
         if val_macro_f1 > best_macro_f1:
@@ -168,7 +235,7 @@ def train_model(config):
     # Phase 2: Fine-Tuning
     print("\nStarting Phase 2: Fine-tuning entire network...")
     # Load best model from Phase 1
-    checkpoint = torch.load(best_model_path)
+    checkpoint = torch.load(best_model_path, map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
     
     model = unfreeze_backbone(model)
@@ -177,6 +244,8 @@ def train_model(config):
     patience_counter = 0
     
     for epoch in range(config["fine_tune_epochs"]):
+        if scaler is not None:
+            setattr(optimizer, 'amp_scaler', scaler)
         train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_acc, val_macro_f1 = validate_epoch(model, val_loader, criterion, device)
         
@@ -185,6 +254,9 @@ def train_model(config):
               f"Val Loss: {val_loss:.4f} Acc: {val_acc:.4f} F1: {val_macro_f1:.4f}")
               
         scheduler.step(val_macro_f1)
+        history.append({'epoch': epoch + 1 + config["epochs"], 'train_loss': train_loss, 'val_loss': val_loss, 
+                        'train_acc': train_acc, 'val_acc': val_acc, 'val_f1': val_macro_f1, 'lr': optimizer.param_groups[0]['lr']})
+        pd.DataFrame(history).to_csv("training_history.csv", index=False)
         
         if val_macro_f1 > best_macro_f1:
             best_macro_f1 = val_macro_f1
@@ -196,6 +268,15 @@ def train_model(config):
                 'config': config,
                 'class_mapping': json.load(open("../class_mapping.json"))
             }
+            try:
+                checkpoint['optimizer_state'] = optimizer.state_dict()
+            except Exception:
+                pass
+            try:
+                if 'amp_scaler' in dir(optimizer) and getattr(optimizer, 'amp_scaler') is not None:
+                    checkpoint['scaler_state'] = optimizer.amp_scaler.state_dict()
+            except Exception:
+                pass
             torch.save(checkpoint, best_model_path)
             print(f"--> Saved best model to {best_model_path}")
         else:

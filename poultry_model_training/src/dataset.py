@@ -58,7 +58,7 @@ def get_transforms(image_size=224):
     
     return train_transform, val_test_transform
 
-def create_dataloaders(index_csv, batch_size=32, num_workers=4, image_size=224, seed=42):
+def create_dataloaders(index_csv, batch_size=32, num_workers=2, image_size=224, seed=42):
     df = pd.read_csv(index_csv)
     
     # 70% Train, 15% Val, 15% Test
@@ -77,9 +77,34 @@ def create_dataloaders(index_csv, batch_size=32, num_workers=4, image_size=224, 
     samples_weights = weights[train_df['class_index'].to_numpy()]
     sampler = WeightedRandomSampler(weights=samples_weights, num_samples=len(samples_weights), replacement=True)
     
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler, num_workers=num_workers)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    # Use pin_memory when CUDA is available and keep workers persistent for speed
+    pin_memory = torch.cuda.is_available()
+    persistent = num_workers > 0
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        sampler=sampler,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent,
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent,
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent,
+    )
     
     # Save the splits to disk for evaluation/reusability
     train_df.to_csv("train_split.csv", index=False)
