@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Users,
   Stethoscope,
@@ -11,8 +11,8 @@ import {
 import { toast } from "react-toastify";
 import DashboardCard from "../../components/admin/DashboardCard";
 import { FarmTypeChart, AdminBarChart, AdminAreaChart } from "../../components/admin/StatsChart";
-import { SkeletonCard, PageLoader } from "../../components/admin/LoadingSpinner";
-import { getDashboardStats, getAllFarmers, getAllVets, getAllVendors, getAllDevices, getAllAlerts, getAllOutbreaks } from "../../services/adminService";
+import { SkeletonCard } from "../../components/admin/LoadingSpinner";
+import { getAdminOverview, getAllFarmers, getAllVendors, getHardwareKits, getAllAlerts } from "../../services/adminService";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function buildFarmTypeData(farmers) {
@@ -39,34 +39,28 @@ function buildMonthlyData(items, dateKey = "created_at") {
 export default function AdminDashboard() {
   const [stats, setStats] = useState(null);
   const [farmers, setFarmers] = useState([]);
-  const [vets, setVets] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [devices, setDevices] = useState([]);
   const [alerts, setAlerts] = useState([]);
-  const [outbreaks, setOutbreaks] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchAll = async () => {
       try {
-        const [sRes, fRes, vRes, vnRes, dRes, aRes, oRes] = await Promise.allSettled([
-          getDashboardStats(),
+        const [sRes, fRes, vnRes, dRes, aRes] = await Promise.allSettled([
+          getAdminOverview(),
           getAllFarmers(),
-          getAllVets(),
           getAllVendors(),
-          getAllDevices(),
+          getHardwareKits(),
           getAllAlerts(),
-          getAllOutbreaks(),
         ]);
 
-        if (sRes.status === "fulfilled") setStats(sRes.value?.data?.[0] || sRes.value);
+        if (sRes.status === "fulfilled") setStats(sRes.value?.data || sRes.value);
         if (fRes.status === "fulfilled") setFarmers(fRes.value?.data || []);
-        if (vRes.status === "fulfilled") setVets(vRes.value?.data || []);
         if (vnRes.status === "fulfilled") setVendors(vnRes.value?.data || []);
         if (dRes.status === "fulfilled") setDevices(dRes.value?.data || []);
         if (aRes.status === "fulfilled") setAlerts(aRes.value?.data || []);
-        if (oRes.status === "fulfilled") setOutbreaks(oRes.value?.data || []);
-      } catch (err) {
+      } catch {
         toast.error("Failed to load dashboard data");
       } finally {
         setLoading(false);
@@ -96,18 +90,18 @@ export default function AdminDashboard() {
       trendLabel: "Registered farms",
     },
     {
-      title: "Veterinarians",
-      value: stats?.total_vets ?? vets.length,
+      title: "Active Farmers",
+      value: stats?.active_farmers ?? "—",
       icon: Stethoscope,
       color: "blue",
-      trendLabel: "Active vets",
+      trendLabel: "Farm profiles active",
     },
     {
-      title: "Vendors",
-      value: vendors.length,
+      title: "Online Devices",
+      value: stats?.online_devices ?? "—",
       icon: Store,
       color: "lime",
-      trendLabel: "Registered vendors",
+      trendLabel: `${stats?.offline_devices ?? 0} offline`,
     },
     {
       title: "IoT Devices",
@@ -118,17 +112,17 @@ export default function AdminDashboard() {
     },
     {
       title: "Active Alerts",
-      value: stats?.total_alerts ?? alerts.length,
+      value: stats?.active_alerts ?? alerts.length,
       icon: Bell,
       color: "red",
       trendLabel: "Monitoring alerts",
     },
     {
-      title: "Outbreaks",
-      value: outbreaks.length,
+      title: "Active Veterinarians",
+      value: stats?.active_veterinarians ?? "—",
       icon: Activity,
       color: "emerald",
-      trendLabel: "Tracked outbreaks",
+      trendLabel: `${stats?.total_veterinarians ?? 0} registered`,
     },
   ];
 
@@ -232,7 +226,7 @@ export default function AdminDashboard() {
           ) : (() => {
             const statusCounts = {};
             devices.forEach((d) => {
-              const s = d.status || "Active";
+              const s = d.device_status || d.status || "Available";
               statusCounts[s] = (statusCounts[s] || 0) + 1;
             });
             const chartData = Object.entries(statusCounts).map(([name, value]) => ({ name, value }));
@@ -253,9 +247,9 @@ export default function AdminDashboard() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[
             { label: "Total Birds Monitored", value: farmers.reduce((a, f) => a + (f.total_birds || 0), 0).toLocaleString() },
-            { label: "Active Devices", value: devices.filter((d) => d.status === "Active" || !d.status).length },
-            { label: "Critical Alerts", value: alerts.filter((a) => a.severity === "Critical").length },
-            { label: "Active Outbreaks", value: outbreaks.filter((o) => o.status === "Active").length },
+            { label: "Online Devices", value: stats?.online_devices ?? "—" },
+            { label: "Open Support", value: stats?.open_support_tickets ?? "—" },
+            { label: "Pending Assignments", value: stats?.pending_assignment_requests ?? "—" },
           ].map((item) => (
             <div key={item.label} className="bg-white/15 rounded-xl p-4 backdrop-blur-sm">
               <p className="text-2xl font-extrabold">{item.value}</p>

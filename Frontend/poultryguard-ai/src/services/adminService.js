@@ -46,6 +46,19 @@ const unwrap = (res) => res.data;
 export const getDashboardStats = () =>
   adminApi.get("/admin/dashboard/stats").then(unwrap);
 
+export const getAdminOverview = () => adminApi.get("/admin/overview").then(unwrap);
+export const getPeopleFarmers = (params = {}) => adminApi.get("/admin/farmers", { params }).then(unwrap);
+export const getPeopleVeterinarians = () => adminApi.get("/admin/veterinarians").then(unwrap);
+export const getHardwareKits = () => adminApi.get("/admin/hardware-kits").then(unwrap);
+export const getAvailableHardwareKits = () => adminApi.get("/admin/hardware-kits/available").then(unwrap);
+export const getAssignmentRequests = () => adminApi.get("/admin/assignment-requests").then(unwrap);
+export const assignHardwareKit = (data) => adminApi.post("/admin/hardware-kits/assign", data).then(unwrap);
+export const replaceHardwareKit = (data) => adminApi.post("/admin/hardware-kits/replace", data).then(unwrap);
+export const getAssignmentHistory = () => adminApi.get("/admin/assignments/history").then(unwrap);
+export const getDiseaseAlerts = () => adminApi.get("/admin/disease-alerts").then(unwrap);
+export const getSupportTickets = () => adminApi.get("/admin/support-tickets").then(unwrap);
+export const updateSupportTicket = (id, data) => adminApi.patch(`/admin/support-tickets/${id}`, data).then(unwrap);
+
 // ─── Farmers ─────────────────────────────────────────────────────────────────
 export const getAllFarmers = () =>
   adminApi.get("/admin/farmers/all").then(unwrap);

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import { loginUser } from "../../services/authService";
@@ -40,15 +40,15 @@ export default function Login() {
         toast.success("Login successful");
 
         if (result.data.role === "Farmer") {
-          navigate(result.data.profile_completed ? "/farmer/dashboard" : "/farmer/complete-profile");
+          navigate("/farmer/dashboard");
         }
-        else if (result.data.role === "Veterinarian") navigate("/vet/dashboard");
+        else if (result.data.role === "Veterinarian") navigate(result.data.profile_completed ? "/vet/dashboard" : "/vet/complete-profile");
         else if (result.data.role === "Vendor") navigate("/vendor/dashboard");
         else navigate("/admin/dashboard");
       } else {
         toast.error(result.error || "Login failed");
       }
-    } catch (error) {
+    } catch {
       toast.error("Unable to login. Please try again.");
     } finally {
       setLoading(false);

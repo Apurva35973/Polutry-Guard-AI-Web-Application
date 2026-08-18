@@ -136,11 +136,21 @@ import AlertsMonitoring from "./pages/admin/AlertsMonitoring";
 import OutbreakMonitoring from "./pages/admin/OutbreakMonitoring";
 import Analytics from "./pages/admin/Analytics";
 import Profile from "./pages/admin/Profile";
+import AdminOperations from "./pages/admin/AdminOperations";
 
 // Farmer & Vet
 import FarmerDashboard from "./pages/dashboards/FarmerDashboard";
 import FarmerProfileCompletion from "./pages/farmer/FarmerProfileCompletion";
+import FarmerOperations from "./pages/farmer/FarmerOperations";
+import FarmerLayout from "./layouts/FarmerLayout";
 import VetDashboard from "./pages/dashboards/VetDashboard";
+import VetProfileCompletion from "./pages/vet/VetProfileCompletion";
+import VetLayout from "./layouts/VetLayout";
+import VetCases from "./pages/vet/VetCases";
+import VetAlerts from "./pages/vet/VetAlerts";
+import VetFarmers from "./pages/vet/VetFarmers";
+import VetConsultations from "./pages/vet/VetConsultations";
+import VetReports from "./pages/vet/VetReports";
 
 // Vendor Layout
 import VendorLayout from "./layouts/VendorLayout";
@@ -189,6 +199,9 @@ function App() {
               path="farmers"
               element={<ManageFarmers />}
             />
+            <Route path="people" element={<AdminOperations initialTab="people" />} />
+            <Route path="hardware" element={<AdminOperations initialTab="hardware" />} />
+            <Route path="support" element={<AdminOperations initialTab="support" />} />
 
             <Route
               path="vets"
@@ -242,25 +255,30 @@ function App() {
             }
           />
 
-          <Route
-            path="/farmer/dashboard"
-            element={
-              <ProtectedRoute role="Farmer">
-                <FarmerDashboard />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/farmer" element={<ProtectedRoute role="Farmer"><FarmerLayout /></ProtectedRoute>}>
+            <Route path="dashboard" element={<FarmerDashboard />} />
+            <Route path="monitoring" element={<FarmerOperations page="monitoring" />} />
+            <Route path="health" element={<FarmerOperations page="health" />} />
+            <Route path="mortality" element={<FarmerOperations page="mortality" />} />
+            <Route path="alerts" element={<FarmerOperations page="alerts" />} />
+            <Route path="reminders" element={<FarmerOperations page="reminders" />} />
+            <Route path="reports" element={<FarmerOperations page="reports" />} />
+            <Route path="devices" element={<FarmerOperations page="devices" />} />
+            <Route path="profile" element={<FarmerOperations page="profile" />} />
+          </Route>
 
           {/* ================= VET ================= */}
 
-          <Route
-            path="/vet/dashboard"
-            element={
-              <ProtectedRoute role="Veterinarian">
-                <VetDashboard />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/vet/complete-profile" element={<ProtectedRoute role="Veterinarian"><VetProfileCompletion /></ProtectedRoute>} />
+
+          <Route path="/vet" element={<ProtectedRoute role="Veterinarian"><VetLayout /></ProtectedRoute>}>
+            <Route path="dashboard" element={<VetDashboard />} />
+            <Route path="cases" element={<VetCases />} />
+            <Route path="alerts" element={<VetAlerts />} />
+            <Route path="farmers" element={<VetFarmers />} />
+            <Route path="consultations" element={<VetConsultations />} />
+            <Route path="reports" element={<VetReports />} />
+          </Route>
 
           {/* ================= VENDOR ================= */}
 

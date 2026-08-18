@@ -1,12 +1,11 @@
 import React from "react";
+import { Loader2 } from "lucide-react";
 
-export default function LoadingSpinner({ message = "Loading..." }) {
+export default function LoadingSpinner({ message = "Loading data..." }) {
   return (
-    <div className="grid min-h-72 place-items-center">
-      <div className="text-center">
-        <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-emerald-500/20 border-t-emerald-400" />
-        <p className="mt-4 text-sm font-semibold text-emerald-200">{message}</p>
-      </div>
+    <div className="flex flex-col items-center justify-center p-12 text-center bg-white rounded-2xl border border-gray-100 shadow-sm">
+      <Loader2 className="animate-spin text-[#166534] mb-3" size={32} />
+      <p className="text-sm font-semibold text-gray-700">{message}</p>
     </div>
   );
 }

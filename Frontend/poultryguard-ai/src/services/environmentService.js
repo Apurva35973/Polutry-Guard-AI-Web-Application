@@ -1,22 +1,25 @@
 import axios from "axios";
 
 const API_URL = "http://localhost:5000";
+const authConfig = () => ({ headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` } });
 
 export const getCurrentEnvironment = async (farmId) => {
-  const response = await axios.get(`${API_URL}/api/environment/current/${farmId}`);
+  const response = await axios.get(`${API_URL}/api/environment/current/${farmId}`, authConfig());
   return response.data;
 };
 
-export const getEnvironmentHistory = async (farmId, limit = 50) => {
+export const getEnvironmentHistory = async (farmId, limit = 100, range = null) => {
+  const params = { limit };
+  if (range) params.range = range;
   const response = await axios.get(`${API_URL}/api/environment/history/${farmId}`, {
-    params: { limit },
+    ...authConfig(), params,
   });
   return response.data;
 };
 
 export const getEnvironmentAlerts = async (farmId, limit = 20) => {
   const response = await axios.get(`${API_URL}/api/environment/alerts/${farmId}`, {
-    params: { limit },
+    ...authConfig(), params: { limit },
   });
   return response.data;
 };

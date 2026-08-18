@@ -39,6 +39,7 @@ def create_app():
                     "GET",
                     "POST",
                     "PUT",
+                    "PATCH",
                     "DELETE",
                     "OPTIONS"
                 ],
@@ -59,6 +60,9 @@ def create_app():
     # JWT Configuration
 
     app.config["JWT_SECRET_KEY"] = "poultry_guard_secret"
+    app.config["DEVICE_OFFLINE_TIMEOUT_SECONDS"] = int(
+        os.getenv("DEVICE_OFFLINE_TIMEOUT_SECONDS", "120")
+    )
 
     jwt_mgr = JWTManager(app)
 

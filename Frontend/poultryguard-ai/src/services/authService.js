@@ -51,3 +51,11 @@ export const completeFarmerProfile = async (data) => {
 
   return response.data;
 };
+
+export const completeVeterinarianProfile = async (data) => {
+  const response = await axios.put(
+    `${API_URL}/vet/profile/complete`, data,
+    { headers: { Authorization: `Bearer ${sessionStorage.getItem("token")}` } }
+  );
+  return response.data;
+};

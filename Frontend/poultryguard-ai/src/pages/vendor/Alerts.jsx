@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Bell, RefreshCw } from "lucide-react";
-import AlertCard from "../../components/vendor/AlertCard";
+import { AlertTriangle, Bell, RefreshCw } from "lucide-react";
+import UnifiedAlertCard from "../../components/common/UnifiedAlertCard";
 import LoadingSpinner from "../../components/vendor/LoadingSpinner";
+import EmptyState from "../../components/common/EmptyState";
 import { getAlerts } from "../../services/vendorService";
 
 export default function Alerts() {
@@ -16,7 +17,7 @@ export default function Alerts() {
       const data = await getAlerts();
       setAlerts(Array.isArray(data) ? data : []);
     } catch (err) {
-      setError(err.message || "Unable to load alerts.");
+      setError(err.message || "Unable to load vendor alerts feed.");
     } finally {
       setLoading(false);
     }
@@ -26,46 +27,58 @@ export default function Alerts() {
     loadAlerts();
   }, []);
 
-  if (loading) return <LoadingSpinner message="Loading alerts..." />;
+  if (loading) return <LoadingSpinner message="Retrieving regional alert signals..." />;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+    <div className="space-y-8">
+      {/* ── Header ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200/80 pb-5">
         <div>
-          <p className="text-sm font-bold uppercase text-emerald-300">Biosecurity</p>
-          <h2 className="mt-2 flex items-center gap-2 text-3xl font-black text-white">
-            <Bell size={28} />
-            Alerts
-          </h2>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-[#166534] bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+              Biosecurity Network
+            </span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 mt-2">
+            Regional Biosecurity Alerts
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Real-time threshold crossings and disease notifications broadcast from member farms.
+          </p>
         </div>
 
         <button
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-700/40 bg-emerald-500/10 px-4 py-2 text-sm font-bold text-emerald-200"
+          className="btn-secondary self-start sm:self-auto"
           onClick={loadAlerts}
           type="button"
         >
           <RefreshCw size={16} />
-          Refresh
+          <span>Refresh Alerts</span>
         </button>
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
-          {error}
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900 font-medium flex items-center gap-3">
+          <AlertTriangle size={18} className="text-red-700 flex-shrink-0" />
+          <span>{error}</span>
         </div>
       )}
 
       {alerts.length ? (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-6 md:grid-cols-2">
           {alerts.map((alert) => (
-            <AlertCard alert={alert} key={alert.alert_id} />
+            <UnifiedAlertCard
+              alert={alert}
+              key={alert.alert_id || alert.id}
+            />
           ))}
         </div>
       ) : (
-        <div className="rounded-lg border border-emerald-900/30 bg-white/[0.04] p-12 text-center">
-          <p className="font-bold text-white">No alerts found</p>
-          <p className="mt-2 text-sm text-slate-400">Your alert feed is clear.</p>
-        </div>
+        <EmptyState
+          icon={Bell}
+          title="No Active Alerts Found"
+          description="Your vendor region is currently free of active or critical environmental alerts."
+        />
       )}
     </div>
   );

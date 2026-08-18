@@ -117,6 +117,7 @@ def nearby_farms():
             full_name,
             farm_name,
             farm_type,
+            address,
             total_birds,
             latitude,
             longitude

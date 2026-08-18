@@ -27,6 +27,10 @@ ENVIRONMENT_THRESHOLDS = {
         "warning_low": float(os.getenv("POULTRY_HUM_WARNING_LOW", 40)),
         "critical_low": float(os.getenv("POULTRY_HUM_CRITICAL_LOW", 30)),
     },
+    "ammonia": {
+        "warning_high": float(os.getenv("POULTRY_AMMONIA_WARNING_HIGH", 20)),
+        "critical_high": float(os.getenv("POULTRY_AMMONIA_CRITICAL_HIGH", 25)),
+    },
 }
 
 DEFAULT_LOCATION = {
@@ -94,7 +98,7 @@ def fetch_openweather_reading(farm_id: str, lat: float | None = None, lon: float
     }
 
 
-def evaluate_environment(temperature: float, humidity: float) -> tuple[str, list[dict]]:
+def evaluate_environment(temperature: float, humidity: float, ammonia: float | None = None) -> tuple[str, list[dict]]:
     humidity = normalize_humidity(humidity)
     alerts = []
 
@@ -102,19 +106,21 @@ def evaluate_environment(temperature: float, humidity: float) -> tuple[str, list
         ("temperature", float(temperature), ENVIRONMENT_THRESHOLDS["temperature"], "C"),
         ("humidity", float(humidity), ENVIRONMENT_THRESHOLDS["humidity"], "%"),
     ]
+    if ammonia is not None:
+        checks.append(("ammonia", float(ammonia), ENVIRONMENT_THRESHOLDS["ammonia"], " ppm"))
 
     status = "NORMAL"
     for parameter, value, thresholds, unit in checks:
         if value >= thresholds["critical_high"]:
             status = "CRITICAL"
             alerts.append(build_alert(parameter, value, thresholds["critical_high"], "CRITICAL", "above", unit))
-        elif value <= thresholds["critical_low"]:
+        elif thresholds.get("critical_low") is not None and value <= thresholds["critical_low"]:
             status = "CRITICAL"
             alerts.append(build_alert(parameter, value, thresholds["critical_low"], "CRITICAL", "below", unit))
         elif value >= thresholds["warning_high"] and status != "CRITICAL":
             status = "WARNING"
             alerts.append(build_alert(parameter, value, thresholds["warning_high"], "WARNING", "above", unit))
-        elif value <= thresholds["warning_low"] and status != "CRITICAL":
+        elif thresholds.get("warning_low") is not None and value <= thresholds["warning_low"] and status != "CRITICAL":
             status = "WARNING"
             alerts.append(build_alert(parameter, value, thresholds["warning_low"], "WARNING", "below", unit))
 
@@ -122,7 +128,7 @@ def evaluate_environment(temperature: float, humidity: float) -> tuple[str, list
 
 
 def build_alert(parameter: str, value: float, threshold: float, severity: str, direction: str, unit: str) -> dict:
-    label = "Temperature" if parameter == "temperature" else "Humidity"
+    label = {"temperature": "Temperature", "humidity": "Humidity", "ammonia": "Ammonia"}[parameter]
     action = (
         "Verify ventilation, drinking water, stocking density, and flock behavior."
         if parameter == "temperature"
@@ -270,17 +276,24 @@ def current_environment(farm_id: str, lat: float | None = None, lon: float | Non
         }
 
 
-def get_history(farm_id: str, limit: int = 100) -> list[dict]:
-    rows = executeQuery(
-        """
-        SELECT id, farm_id, temperature, humidity, timestamp, source, status
+def get_history(farm_id: str, limit: int = 100, time_range: str | None = None) -> list[dict]:
+    query = """
+        SELECT id, farm_id, temperature, humidity, ammonia, timestamp, source, status
         FROM environment_readings
         WHERE farm_id = %s
-        ORDER BY timestamp DESC
-        LIMIT %s
-        """,
-        (farm_id, limit),
-    )
+    """
+    params = [farm_id]
+    if time_range == "24h":
+        query += " AND timestamp >= DATE_SUB(NOW(), INTERVAL 24 HOUR)"
+    elif time_range == "7d":
+        query += " AND timestamp >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+    elif time_range == "30d":
+        query += " AND timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+
+    query += " ORDER BY timestamp DESC LIMIT %s"
+    params.append(limit)
+
+    rows = executeQuery(query, tuple(params))
     return rows
 
 

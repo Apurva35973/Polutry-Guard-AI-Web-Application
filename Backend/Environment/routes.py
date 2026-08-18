@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 
 from flask import Blueprint, jsonify, request
+from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
+from utlis.db_utlis import executeQuery
 
 from Environment.service import current_environment, evaluate_environment, get_alerts, get_history
 
@@ -15,21 +17,35 @@ if str(PROJECT_ROOT) not in sys.path:
 environment_bp = Blueprint("environment", __name__)
 
 
+def owned_farm(farm_id):
+    if get_jwt().get("role") != "Farmer":
+        return False
+    rows = executeQuery("SELECT farmer_id FROM Farmers WHERE email=%s AND farmer_id=%s", (get_jwt_identity(), farm_id))
+    return bool(rows)
+
+
 @environment_bp.get("/environment/current/<farm_id>")
+@jwt_required()
 def get_current_environment(farm_id):
+    if not owned_farm(farm_id): return jsonify({"error": "Access denied"}), 403
     lat = request.args.get("lat", type=float)
     lon = request.args.get("lon", type=float)
     return jsonify(current_environment(farm_id, lat=lat, lon=lon))
 
 
 @environment_bp.get("/environment/history/<farm_id>")
+@jwt_required()
 def get_environment_history(farm_id):
+    if not owned_farm(farm_id): return jsonify({"error": "Access denied"}), 403
     limit = request.args.get("limit", default=100, type=int)
-    return jsonify({"farm_id": farm_id, "history": get_history(farm_id, limit=limit)})
+    time_range = request.args.get("range")
+    return jsonify({"farm_id": farm_id, "history": get_history(farm_id, limit=limit, time_range=time_range)})
 
 
 @environment_bp.get("/environment/alerts/<farm_id>")
+@jwt_required()
 def get_environment_alerts(farm_id):
+    if not owned_farm(farm_id): return jsonify({"error": "Access denied"}), 403
     limit = request.args.get("limit", default=50, type=int)
     return jsonify({"farm_id": farm_id, "alerts": get_alerts(farm_id, limit=limit)})
 

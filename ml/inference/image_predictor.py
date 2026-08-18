@@ -4,7 +4,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, BinaryIO
 
-IMAGE_LABELS = ("Coccidiosis", "Healthy", "Newcastle Disease", "Salmonella")
+# Keep this order in sync with the separately trained ResNet18 class mapping.
+IMAGE_LABELS = ("Healthy", "Coccidiosis", "Newcastle Disease", "Salmonella", "Fowlpox")
 IMAGE_SIZE = (224, 224)
 NORMALIZE_MEAN = (0.485, 0.456, 0.406)
 NORMALIZE_STD = (0.229, 0.224, 0.225)
@@ -59,6 +60,8 @@ def predict_image(image_input: str | Path | BinaryIO) -> dict[str, Any]:
             image.load()
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise ValueError("Invalid image input. Upload a readable image file.") from exc
+    if hasattr(image_input, "seek"):
+        image_input.seek(0)
     # Check the supplied artifact before reporting optional runtime dependency issues.
     image_model_path()
     try:

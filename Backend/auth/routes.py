@@ -51,6 +51,10 @@ def login():
                 email,
                 password_hash,
                 farm_name,
+                farm_type,
+                address,
+                latitude,
+                longitude,
                 'Farmer' as role
             FROM Farmers
             WHERE email=%s
@@ -105,6 +109,27 @@ def login():
 
     user = result[0]
 
+    if user["role"] == "Farmer":
+        profile_fields = ("farm_name", "farm_type", "address", "latitude", "longitude")
+        user["profile_completed"] = all(
+            user.get(field) is not None and str(user[field]).strip() != ""
+            for field in profile_fields
+        )
+    elif user["role"] == "Veterinarian":
+        profile_fields = ("specialization", "license_number", "experience_years", "hospital_clinic")
+        # The login query currently returns only account fields for vets; load the
+        # optional professional profile separately to preserve the existing login shape.
+        vet_profile = executeQuery(
+            """SELECT specialization, license_number, experience_years, hospital_clinic
+               FROM Veterinarians WHERE vet_id=%s""",
+            (user["id"],),
+        )[0]
+        user.update(vet_profile)
+        user["profile_completed"] = all(
+            user.get(field) is not None and str(user[field]).strip() != ""
+            for field in profile_fields
+        )
+
     success = crypto.verify(
         password,
         user["password_hash"]
@@ -133,18 +158,13 @@ def login():
 @auth_bp.route("/register/farmer", methods=["POST"])
 def register_farmer():
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
 
     required_fields = [
         "full_name",
         "email",
         "phone_number",
-        "password",
-        "farm_name",
-        "farm_type",
-        "address",
-        "latitude",
-        "longitude"
+        "password"
     ]
 
     for field in required_fields:
@@ -197,11 +217,11 @@ def register_farmer():
         data["email"],
         data["phone_number"],
         password_hash,
-        data["farm_name"],
-        data["farm_type"],
-        data["address"],
-        data["latitude"],
-        data["longitude"]
+        data.get("farm_name"),
+        data.get("farm_type"),
+        data.get("address"),
+        data.get("latitude"),
+        data.get("longitude")
     )
 
     executeQuery(query, params)
@@ -221,10 +241,6 @@ def register_vet():
         "email",
         "phone_number",
         "password",
-        "specialization",
-        "license_number",
-        "experience_years",
-        "hospital_clinic"
     ]
 
     for field in required_fields:
@@ -275,10 +291,10 @@ def register_vet():
         data["full_name"],
         data["email"],
         data["phone_number"],
-        data["specialization"],
-        data["license_number"],
-        data["experience_years"],
-        data["hospital_clinic"],
+        None,
+        None,
+        None,
+        None,
         password_hash
     )
 
