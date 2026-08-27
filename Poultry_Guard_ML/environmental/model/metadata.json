@@ -1,0 +1,54 @@
+{
+  "model_type": "XGBClassifier",
+  "objective": "multi:softprob",
+  "num_classes": 3,
+  "classes": [
+    "Fowlpox",
+    "Infectious Coryza",
+    "Healthy"
+  ],
+  "class_mapping": {
+    "Fowlpox": 0,
+    "Infectious Coryza": 1,
+    "Healthy": 2
+  },
+  "inverse_class_mapping": {
+    "0": "Fowlpox",
+    "1": "Infectious Coryza",
+    "2": "Healthy"
+  },
+  "feature_names": [
+    "Breed_White Leghorn",
+    "Breed_Rhode Island Red",
+    "Breed_Broiler Ross 308",
+    "Temperature_C",
+    "Humidity_percent",
+    "Ammonia_ppm",
+    "Mortality_Rate_percent",
+    "Egg_Production_percent",
+    "Amount_of_Feeding_g_bird_day"
+  ],
+  "feature_importances": {
+    "Breed_White Leghorn": 3.5058415051025804e-06,
+    "Breed_Rhode Island Red": 1.0570502126938663e-05,
+    "Breed_Broiler Ross 308": 1.362606667498767e-06,
+    "Temperature_C": 0.47849223017692566,
+    "Humidity_percent": 0.08785970509052277,
+    "Ammonia_ppm": 0.3100028336048126,
+    "Mortality_Rate_percent": 0.11958841234445572,
+    "Egg_Production_percent": 0.0016991393640637398,
+    "Amount_of_Feeding_g_bird_day": 0.002342232968658209
+  },
+  "best_iteration": 99,
+  "training_samples": 800000,
+  "validation_samples": 100000,
+  "test_samples": 100000,
+  "validation_metrics": {
+    "accuracy": 1.0,
+    "log_loss": 2.2487679416371975e-06,
+    "brier_score": 2.104111887664982e-11,
+    "ece": 2.205371856689453e-06
+  },
+  "saved_model_path": "D:\\Polutry-Guard-AI-Web-Application\\Poultry_Guard_ML\\environmental\\model\\poultry_environmental_xgboost.pkl",
+  "saved_preprocessor_path": "D:\\Polutry-Guard-AI-Web-Application\\Poultry_Guard_ML\\environmental\\preprocessing\\preprocessor.pkl"
+}

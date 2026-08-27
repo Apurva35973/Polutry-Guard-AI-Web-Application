@@ -1,1 +1,1 @@
-{"farm_id": "3", "temperature": 23.38, "humidity": 72.0, "timestamp": "2026-08-17T16:45:09.591630+00:00", "source": "openweather", "stale": false, "status": "WARNING"}
+{"farm_id": "3", "temperature": 27.69, "humidity": 66.0, "timestamp": "2026-08-21T06:26:26.805133+00:00", "source": "openweather", "stale": false, "status": "NORMAL"}

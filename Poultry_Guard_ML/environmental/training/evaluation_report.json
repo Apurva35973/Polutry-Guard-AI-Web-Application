@@ -1,0 +1,222 @@
+{
+  "test_samples": 100000,
+  "classes": [
+    "Fowlpox",
+    "Infectious Coryza",
+    "Healthy"
+  ],
+  "class_mapping": {
+    "Fowlpox": 0,
+    "Infectious Coryza": 1,
+    "Healthy": 2
+  },
+  "metrics": {
+    "accuracy": 1.0,
+    "log_loss": 2.2905232981429435e-06,
+    "brier_score": 3.4318762992038446e-10,
+    "ece": 2.2649765014648438e-06,
+    "precision_macro": 1.0,
+    "recall_macro": 1.0,
+    "f1_macro": 1.0,
+    "f1_weighted": 1.0,
+    "probability_sum_max_deviation": 1.1920928955078125e-07,
+    "probability_sum_valid": true
+  },
+  "per_class": {
+    "Fowlpox": {
+      "class_index": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "support": 33334
+    },
+    "Infectious Coryza": {
+      "class_index": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "support": 33333
+    },
+    "Healthy": {
+      "class_index": 2,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1_score": 1.0,
+      "support": 33333
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "Fowlpox",
+      "Infectious Coryza",
+      "Healthy"
+    ],
+    "matrix": [
+      [
+        33334,
+        0,
+        0
+      ],
+      [
+        0,
+        33333,
+        0
+      ],
+      [
+        0,
+        0,
+        33333
+      ]
+    ],
+    "matrix_normalized": [
+      [
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ]
+  },
+  "feature_importances": {
+    "Breed_White Leghorn": {
+      "gain": 0.08368297666311264,
+      "weight": 1.0,
+      "cover": 6.03336763381958
+    },
+    "Breed_Rhode Island Red": {
+      "gain": 0.252313494682312,
+      "weight": 1.0,
+      "cover": 3.555551290512085
+    },
+    "Breed_Broiler Ross 308": {
+      "gain": 0.03252485394477844,
+      "weight": 2.0,
+      "cover": 6.649591445922852
+    },
+    "Temperature_C": {
+      "gain": 11421.41015625,
+      "weight": 218.0,
+      "cover": 34876.546875
+    },
+    "Humidity_percent": {
+      "gain": 2097.174560546875,
+      "weight": 216.0,
+      "cover": 25130.4921875
+    },
+    "Ammonia_ppm": {
+      "gain": 7399.638671875,
+      "weight": 194.0,
+      "cover": 29610.15234375
+    },
+    "Mortality_Rate_percent": {
+      "gain": 2854.525634765625,
+      "weight": 217.0,
+      "cover": 32860.9140625
+    },
+    "Egg_Production_percent": {
+      "gain": 40.5577507019043,
+      "weight": 66.0,
+      "cover": 5230.9716796875
+    },
+    "Amount_of_Feeding_g_bird_day": {
+      "gain": 55.90812683105469,
+      "weight": 65.0,
+      "cover": 2818.064697265625
+    }
+  },
+  "breed_performance": {
+    "White Leghorn": {
+      "samples": 33306,
+      "accuracy": 1.0,
+      "macro_f1": 1.0,
+      "log_loss": 2.309528781552217e-06,
+      "disease_distribution": {
+        "Fowlpox": 11134,
+        "Infectious Coryza": 11093,
+        "Healthy": 11079
+      },
+      "confusion_matrix": [
+        [
+          11134,
+          0,
+          0
+        ],
+        [
+          0,
+          11093,
+          0
+        ],
+        [
+          0,
+          0,
+          11079
+        ]
+      ]
+    },
+    "Rhode Island Red": {
+      "samples": 33269,
+      "accuracy": 1.0,
+      "macro_f1": 1.0,
+      "log_loss": 2.215960421381169e-06,
+      "disease_distribution": {
+        "Fowlpox": 11163,
+        "Infectious Coryza": 11028,
+        "Healthy": 11078
+      },
+      "confusion_matrix": [
+        [
+          11163,
+          0,
+          0
+        ],
+        [
+          0,
+          11028,
+          0
+        ],
+        [
+          0,
+          0,
+          11078
+        ]
+      ]
+    },
+    "Broiler Ross 308": {
+      "samples": 33425,
+      "accuracy": 1.0,
+      "macro_f1": 1.0,
+      "log_loss": 2.3458001123799477e-06,
+      "disease_distribution": {
+        "Fowlpox": 11037,
+        "Infectious Coryza": 11212,
+        "Healthy": 11176
+      },
+      "confusion_matrix": [
+        [
+          11037,
+          0,
+          0
+        ],
+        [
+          0,
+          11212,
+          0
+        ],
+        [
+          0,
+          0,
+          11176
+        ]
+      ]
+    }
+  }
+}

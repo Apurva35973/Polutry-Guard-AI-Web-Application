@@ -1,0 +1,1 @@
+"""Environmental training module."""

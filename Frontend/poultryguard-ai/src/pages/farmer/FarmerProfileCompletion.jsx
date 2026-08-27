@@ -7,6 +7,7 @@ import { completeFarmerProfile } from "../../services/authService";
 const initialForm = {
   farm_name: "",
   farm_type: "Broiler",
+  breed: "Broiler Ross 308",
   address: "",
   latitude: "",
   longitude: "",
@@ -131,6 +132,27 @@ export default function FarmerProfileCompletion() {
                 value={form.farm_name}
                 onChange={updateField}
               />
+            </label>
+
+            <label className="auth-field">
+              Poultry Breed
+              <select
+                name="breed"
+                value={form.breed}
+                onChange={(e) => {
+                  const selectedBreed = e.target.value;
+                  const mappedType = selectedBreed === "White Leghorn" ? "Layer" : (selectedBreed === "Rhode Island Red" ? "Breeder" : "Broiler");
+                  setForm((current) => ({
+                    ...current,
+                    breed: selectedBreed,
+                    farm_type: mappedType,
+                  }));
+                }}
+              >
+                <option value="White Leghorn">White Leghorn (Commercial Layer)</option>
+                <option value="Rhode Island Red">Rhode Island Red (Dual Purpose)</option>
+                <option value="Broiler Ross 308">Broiler Ross 308 (Commercial Meat)</option>
+              </select>
             </label>
 
             <label className="auth-field">

@@ -281,4 +281,5 @@ CREATE TABLE Vendor_Trips (
     REFERENCES Transport_Requests(request_id)
     ON DELETE CASCADE
 );
-SELECT * FROM Vendors;
+SELECT * FROM Farmers;
+SELECT * FROM Veterinarians;

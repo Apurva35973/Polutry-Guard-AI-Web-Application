@@ -125,9 +125,9 @@ def get_risk(farm_id):
 @environment_bp.post("/ml/predict")
 def predict_ml_status():
     """Run image disease classification and environmental late-fusion inference."""
-    from ml.inference.environmental_predictor import EnvironmentalInputError
-    from ml.inference.image_predictor import ImageModelUnavailable
-    from ml.inference.ensemble_predictor import predict_poultry_status
+    from Poultry_Guard_ML.environmental.preprocessing.preprocessor import EnvironmentalInputError
+    from Poultry_Guard_ML.cnn.inference.image_predictor import ImageModelUnavailable
+    from Poultry_Guard_ML.ensemble.ensemble_predictor import predict_poultry_status
 
     image = request.files.get("image")
     if image is None or not image.filename:

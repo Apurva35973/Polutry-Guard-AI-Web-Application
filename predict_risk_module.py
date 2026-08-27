@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ml.inference.environmental_predictor import predict_environmental_risk
+from Poultry_Guard_ML.environmental.inference.environmental_predictor import predict_environmental_risk
 
 
 def predict_risk(input_data: dict[str, Any]) -> dict[str, Any]:

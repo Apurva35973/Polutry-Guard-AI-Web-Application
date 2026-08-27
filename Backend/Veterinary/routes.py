@@ -481,9 +481,11 @@ def update_consultation_handler(consultation_id):
     params = []
 
     if status:
-        db_status = "Completed" if status == "Resolved" else status
-        updates.append("status=%s")
-        params.append(db_status)
+        allowed = {"Pending", "Active", "Completed", "Resolved", "Cancelled"}
+        if status in allowed:
+            db_status = status  # All values now valid in ENUM
+            updates.append("status=%s")
+            params.append(db_status)
 
     if recommendation is not None:
         updates.append("recommendation=%s")

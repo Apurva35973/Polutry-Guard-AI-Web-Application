@@ -6,6 +6,7 @@ import {
   Calendar,
   Camera,
   CheckCircle2,
+  ClipboardList,
   Cpu,
   Droplets,
   HeartPulse,
@@ -14,6 +15,7 @@ import {
   Shield,
   ShieldAlert,
   ShieldCheck,
+  Stethoscope,
   Syringe,
   Thermometer,
   TrendingUp,
@@ -71,6 +73,7 @@ function FarmerProfileModal({ onComplete }) {
   const [form, setForm] = useState({
     farm_name: "",
     farm_type: "Broiler",
+    breed: "Broiler Ross 308",
     address: "",
     latitude: "",
     longitude: "",
@@ -172,6 +175,23 @@ function FarmerProfileModal({ onComplete }) {
               onChange={update}
               className="input"
             />
+          </label>
+          <label className="grid gap-1.5 text-sm font-semibold text-gray-700 sm:col-span-2">
+            Poultry Breed
+            <select
+              name="breed"
+              value={form.breed || "Broiler Ross 308"}
+              onChange={(e) => {
+                const b = e.target.value;
+                const mappedType = b === "White Leghorn" ? "Layer" : (b === "Rhode Island Red" ? "Breeder" : "Broiler");
+                setForm((current) => ({ ...current, breed: b, farm_type: mappedType }));
+              }}
+              className="input"
+            >
+              <option value="White Leghorn">White Leghorn (Commercial Layer)</option>
+              <option value="Rhode Island Red">Rhode Island Red (Dual Purpose)</option>
+              <option value="Broiler Ross 308">Broiler Ross 308 (Commercial Meat)</option>
+            </select>
           </label>
           <label className="grid gap-1.5 text-sm font-semibold text-gray-700 sm:col-span-2">
             Farm Type
@@ -1087,6 +1107,101 @@ function FarmerDashboard() {
             </div>
           )}
         </div>
+      </section>
+
+      {/* ── Veterinary Consultations Section ── */}
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-200/80 p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-5 border-b border-gray-100 pb-4">
+          <div>
+            <h2 className="font-bold text-gray-900 text-lg flex items-center gap-2">
+              <Stethoscope className="text-[#166534]" size={20} />
+              Veterinary Consultations
+            </h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Diagnoses and prescriptions issued by your assigned veterinary doctor
+            </p>
+          </div>
+          <span className="text-xs font-bold text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
+            {(farmSummary?.vet_consultations || []).length} Records
+          </span>
+        </div>
+
+        {(farmSummary?.vet_consultations || []).length ? (
+          <div className="space-y-3">
+            {(farmSummary.vet_consultations).map((item) => {
+              const statusColor =
+                item.status === "Completed" || item.status === "Resolved"
+                  ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                  : item.status === "Active"
+                  ? "bg-blue-50 text-blue-800 border-blue-200"
+                  : item.status === "Cancelled"
+                  ? "bg-red-50 text-red-800 border-red-200"
+                  : "bg-amber-50 text-amber-800 border-amber-200";
+              return (
+                <div
+                  key={item.consultation_id}
+                  className="rounded-xl border border-gray-200 bg-gray-50/60 p-4 hover:bg-white hover:shadow-sm transition-all"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-9 h-9 rounded-full bg-[#166534]/10 flex items-center justify-center shrink-0">
+                        <Stethoscope size={16} className="text-[#166534]" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-gray-900 text-sm">
+                          Dr. {item.vet_name}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {item.vet_specialization} &mdash; {item.vet_clinic}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={`text-xs font-bold px-2.5 py-1 rounded-full border ${statusColor}`}
+                      >
+                        {item.status}
+                      </span>
+                      <span className="text-xs text-gray-400">
+                        {formatTime(item.consultation_date)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {item.disease_name && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <ClipboardList size={13} className="text-rose-500 shrink-0" />
+                      <span className="text-xs font-semibold text-rose-700">
+                        Diagnosed: {item.disease_name}
+                      </span>
+                    </div>
+                  )}
+
+                  {item.recommendation ? (
+                    <div className="mt-2 bg-white rounded-lg border border-emerald-100 p-3">
+                      <p className="text-xs font-bold text-emerald-800 mb-1 uppercase tracking-wide">
+                        Veterinary Prescription / Notes
+                      </p>
+                      <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">
+                        {item.recommendation}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-xs text-gray-400 italic">
+                      No prescription written yet — awaiting vet response.
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <EmptyState
+            icon={Stethoscope}
+            title="No Veterinary Consultations"
+            description="Your vet consultation records will appear here once a veterinary doctor has reviewed your case."
+          />
+        )}
       </section>
     </div>
   );

@@ -107,33 +107,21 @@ const categoriesList = [
 const diseaseKnowledge = [
   {
     name: "Healthy",
-    desc: "Active birds, normal feed & water intake, clean plumage, no respiratory distress.",
+    desc: "Active birds, normal feed & water intake, clean plumage, clear eyes, and no respiratory distress.",
     risk: "Low Risk",
     color: "emerald",
   },
   {
-    name: "Coccidiosis",
-    desc: "Parasitic condition causing intestinal damage, bloody droppings, and lethargy. Treat with anticoccidials.",
-    risk: "High Risk",
-    color: "red",
-  },
-  {
-    name: "Newcastle Disease",
-    desc: "Severe viral infection causing twisted neck, respiratory distress, and high mortality. Immediate quarantine required.",
-    risk: "High Risk",
-    color: "red",
-  },
-  {
-    name: "Salmonella",
-    desc: "Bacterial infection causing white diarrhea, dehydration, and reduced growth. Antibiotic/probiotic management.",
-    risk: "Medium Risk",
-    color: "orange",
-  },
-  {
     name: "Fowlpox",
-    desc: "Viral skin lesions / scabs on comb and wattle, or diptheritic lesions in mouth. Vaccine prevention recommended.",
+    desc: "Viral skin lesions, wart-like nodules / scabs on comb and wattle, or diphtheritic lesions in mouth. Vaccine prevention recommended.",
     risk: "Medium Risk",
     color: "orange",
+  },
+  {
+    name: "Infectious Coryza",
+    desc: "Acute bacterial respiratory infection causing facial swelling, foul-smelling nasal discharge, conjunctivitis, and rales. Prompt antimicrobial treatment required.",
+    risk: "High Risk",
+    color: "red",
   },
 ];
 
@@ -248,6 +236,7 @@ export default function FarmerOperations({ page }) {
     phone_number: "",
     farm_name: "",
     farm_type: "Broiler",
+    breed: "Broiler Ross 308",
     address: "",
     latitude: "",
     longitude: "",
@@ -289,6 +278,7 @@ export default function FarmerOperations({ page }) {
             phone_number: res.data.phone_number || "",
             farm_name: res.data.farm_name || "",
             farm_type: res.data.farm_type || "Broiler",
+            breed: res.data.breed || (res.data.farm_type === "Layer" ? "White Leghorn" : (res.data.farm_type === "Breeder" ? "Rhode Island Red" : "Broiler Ross 308")),
             address: res.data.address || "",
             latitude: res.data.latitude || "",
             longitude: res.data.longitude || "",
@@ -1321,7 +1311,7 @@ export default function FarmerOperations({ page }) {
                 Poultry Disease Image Screening
               </h2>
               <p className="text-xs text-gray-500 mt-1">
-                Upload a fecal or bird visual image to screen for Newcastle, Coccidiosis, Salmonella, or Fowlpox.
+                Upload a bird image to screen for Fowlpox, Infectious Coryza, or Healthy flock condition.
               </p>
 
               <div className="mt-6 grid gap-6 sm:grid-cols-2 items-center">
@@ -1656,6 +1646,24 @@ export default function FarmerOperations({ page }) {
                 }
                 className="input text-xs"
               />
+            </label>
+
+            <label className="grid gap-1.5 text-xs font-bold text-gray-700">
+              Poultry Breed
+              <select
+                disabled={!editing}
+                value={profileForm.breed || "Broiler Ross 308"}
+                onChange={(e) => {
+                  const b = e.target.value;
+                  const mappedType = b === "White Leghorn" ? "Layer" : (b === "Rhode Island Red" ? "Breeder" : "Broiler");
+                  setProfileForm({ ...profileForm, breed: b, farm_type: mappedType });
+                }}
+                className="input text-xs"
+              >
+                <option value="White Leghorn">White Leghorn (Commercial Layer)</option>
+                <option value="Rhode Island Red">Rhode Island Red (Dual Purpose)</option>
+                <option value="Broiler Ross 308">Broiler Ross 308 (Commercial Meat)</option>
+              </select>
             </label>
 
             <label className="grid gap-1.5 text-xs font-bold text-gray-700">

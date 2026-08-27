@@ -15,13 +15,27 @@ def complete_profile():
         return createResult("Access Denied : Farmer Only", None)
 
     data = request.get_json(silent=True) or {}
-    required_fields = ("farm_name", "farm_type", "address", "latitude", "longitude")
+    required_fields = ("farm_name", "address", "latitude", "longitude")
     for field in required_fields:
         if data.get(field) in (None, ""):
             return createResult(f"{field} is required", None)
 
-    if data["farm_type"] not in {"Broiler", "Layer", "Breeder"}:
-        return createResult("farm_type must be Broiler, Layer, or Breeder", None)
+    # Support breed & farm_type
+    valid_breeds = {"White Leghorn", "Rhode Island Red", "Broiler Ross 308"}
+    valid_types = {"Broiler", "Layer", "Breeder"}
+
+    breed = data.get("breed")
+    farm_type = data.get("farm_type")
+
+    if breed and breed in valid_breeds:
+        if not farm_type or farm_type not in valid_types:
+            farm_type = "Layer" if breed == "White Leghorn" else ("Breeder" if breed == "Rhode Island Red" else "Broiler")
+    elif farm_type and farm_type in valid_types:
+        if not breed:
+            breed = "White Leghorn" if farm_type == "Layer" else ("Rhode Island Red" if farm_type == "Breeder" else "Broiler Ross 308")
+    else:
+        breed = "Broiler Ross 308"
+        farm_type = "Broiler"
 
     try:
         latitude = float(data["latitude"])
@@ -51,10 +65,10 @@ def complete_profile():
     executeQuery(
         """
         UPDATE Farmers
-        SET farm_name=%s, farm_type=%s, address=%s, latitude=%s, longitude=%s
+        SET farm_name=%s, farm_type=%s, breed=%s, address=%s, latitude=%s, longitude=%s
         WHERE farmer_id=%s
         """,
-        (data["farm_name"].strip(), data["farm_type"], data["address"].strip(), latitude, longitude, existing_profile["farmer_id"]),
+        (data["farm_name"].strip(), farm_type, breed, data["address"].strip(), latitude, longitude, existing_profile["farmer_id"]),
     )
     return createResult(None, {"profile_completed": True})
 
@@ -92,8 +106,21 @@ def dashboard():
         WHERE farmer_id=%s ORDER BY screened_at DESC LIMIT 5""", (fid,))
     reminders = executeQuery("""SELECT reminder_id, task_name, activity_category, scheduled_at, status FROM Farmer_Reminders
         WHERE farmer_id=%s AND status='Scheduled' ORDER BY scheduled_at LIMIT 5""", (fid,))
+    # Fetch vet consultation responses so farmer can see doctor's diagnosis and prescription
+    vet_consultations = executeQuery("""
+        SELECT vc.consultation_id, vc.disease_name, vc.recommendation, vc.status,
+               vc.consultation_date,
+               v.full_name AS vet_name, v.specialization AS vet_specialization,
+               v.hospital_clinic AS vet_clinic
+        FROM Vet_Consultations vc
+        JOIN Veterinarians v ON v.vet_id = vc.vet_id
+        WHERE vc.farmer_id=%s
+        ORDER BY vc.consultation_date DESC
+        LIMIT 10""", (fid,))
     return createResult(None, {"farm": farmer, "environment": latest[0] if latest else None,
-        "mortality": mortality_analytics(fid), "alerts": alerts, "vaccinations": vaccines, "reminders": reminders, "predictions": predictions})
+        "mortality": mortality_analytics(fid), "alerts": alerts, "vaccinations": vaccines,
+        "reminders": reminders, "predictions": predictions,
+        "vet_consultations": vet_consultations})
 
 
 @farmer_bp.route("/profile", methods=["GET", "PUT"])
@@ -103,7 +130,7 @@ def profile():
     if error: return error
     if request.method == "GET": return createResult(None, farmer)
     data = request.get_json(silent=True) or {}
-    allowed = ("full_name", "phone_number", "farm_name", "farm_type", "address", "latitude", "longitude", "total_birds")
+    allowed = ("full_name", "phone_number", "farm_name", "farm_type", "breed", "address", "latitude", "longitude", "total_birds")
     changes = {key: data[key] for key in allowed if key in data}
     if not changes: return createResult("no editable profile fields supplied", None)
     if "total_birds" in changes:
@@ -111,6 +138,8 @@ def profile():
             changes["total_birds"] = int(changes["total_birds"])
             if changes["total_birds"] < 0: raise ValueError
         except (ValueError, TypeError): return createResult("total_birds must be a non-negative whole number", None)
+    if "breed" in changes and changes["breed"] not in {"White Leghorn", "Rhode Island Red", "Broiler Ross 308"}:
+        return createResult("invalid breed", None)
     if "farm_type" in changes and changes["farm_type"] not in {"Broiler", "Layer", "Breeder"}: return createResult("invalid farm_type", None)
     for coordinate, low, high in (("latitude", -90, 90), ("longitude", -180, 180)):
         if coordinate in changes:
@@ -312,23 +341,34 @@ def disease_prediction():
     image = request.files.get("image")
     if image is None or not image.filename: return createResult("image is required", None)
     try:
-        from ml.inference.image_predictor import predict_image
+        from Poultry_Guard_ML.cnn.inference.image_predictor import predict_image
         result = predict_image(image.stream)
     except (ValueError, RuntimeError, FileNotFoundError) as exc:
         return createResult(str(exc), None)
     fid = farmer["farmer_id"]
-    predicted = result["predicted_disease"]
+    # predict_image returns 'predicted_class' (not 'predicted_disease')
+    predicted = result["predicted_class"]
     confidence = float(result["confidence"])
     risk = "Low" if predicted == "Healthy" else ("High" if confidence >= .75 else "Medium")
-    executeQuery("""INSERT INTO Disease_Predictions (farmer_id, disease_name, risk_level, confidence_score, model_used)
-        VALUES (%s,%s,%s,%s,%s)""", (fid, predicted, risk, confidence * 100, result["model"]))
-    prediction = executeQuery("SELECT LAST_INSERT_ID() prediction_id", ())[0]
-    executeQuery("""INSERT INTO Disease_Prediction_Details (prediction_id, farmer_id, predicted_class, confidence, probabilities, image_name)
-        VALUES (%s,%s,%s,%s,%s,%s)""", (prediction["prediction_id"], fid, predicted, confidence, json_value(result.get("probabilities")), image.filename))
+    try:
+        executeQuery("""INSERT INTO Disease_Predictions (farmer_id, disease_name, risk_level, confidence_score, model_used)
+            VALUES (%s,%s,%s,%s,%s)""", (fid, predicted, risk, round(confidence * 100, 2), result["model"]))
+        prediction = executeQuery("SELECT LAST_INSERT_ID() prediction_id", ())[0]
+        pred_id = prediction["prediction_id"]
+        if pred_id:
+            executeQuery("""INSERT INTO Disease_Prediction_Details (prediction_id, farmer_id, predicted_class, confidence, probabilities, image_name)
+                VALUES (%s,%s,%s,%s,%s,%s)""", (pred_id, fid, predicted, confidence, json_value(result.get("probabilities")), image.filename))
+    except Exception as db_err:
+        # DB logging failure must not block the AI result from reaching the frontend
+        import logging
+        logging.warning(f"Disease prediction DB logging failed: {db_err}")
     if predicted != "Healthy":
         severity = "HIGH" if confidence >= .75 else "MEDIUM"
-        create_alert(fid, "DISEASE RISK", severity, "AI-based screening requires attention", f"Potential {predicted} indication ({confidence * 100:.1f}% confidence). This is not a veterinary diagnosis; consult a veterinarian.", f"screening:{predicted}", 120)
+        create_alert(fid, "DISEASE RISK", severity, "AI-based screening requires attention",
+                     f"Potential {predicted} indication ({confidence * 100:.1f}% confidence). This is not a veterinary diagnosis; consult a veterinarian.",
+                     f"screening:{predicted}", 120)
     return createResult(None, {**result, "risk_level": risk, "disclaimer": "AI-based screening only; not a confirmed veterinary diagnosis."})
+
 
 
 @farmer_bp.route("/reports/generate", methods=["POST"])
