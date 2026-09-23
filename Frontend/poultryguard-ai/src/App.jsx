@@ -137,6 +137,8 @@ import OutbreakMonitoring from "./pages/admin/OutbreakMonitoring";
 import Analytics from "./pages/admin/Analytics";
 import Profile from "./pages/admin/Profile";
 import AdminOperations from "./pages/admin/AdminOperations";
+import VetVerification from "./pages/admin/VetVerification";
+import HardwareRequests from "./pages/admin/HardwareRequests";
 
 // Farmer & Vet
 import FarmerDashboard from "./pages/dashboards/FarmerDashboard";
@@ -202,6 +204,9 @@ function App() {
             <Route path="people" element={<AdminOperations initialTab="people" />} />
             <Route path="hardware" element={<AdminOperations initialTab="hardware" />} />
             <Route path="support" element={<AdminOperations initialTab="support" />} />
+
+            <Route path="vet-verification" element={<VetVerification />} />
+            <Route path="hardware-requests" element={<HardwareRequests />} />
 
             <Route
               path="vets"

@@ -10,7 +10,8 @@ vet_bp = Blueprint('vet', __name__)
 
 def current_vet():
     rows = executeQuery(
-        """SELECT vet_id, full_name, email, phone_number, specialization, license_number, experience_years, hospital_clinic, status
+        """SELECT vet_id, full_name, email, phone_number, specialization, license_number,
+                  experience_years, hospital_clinic, status, verification_status, certificate_url
            FROM Veterinarians WHERE email=%s""", (get_jwt_identity(),)
     )
     return rows[0] if rows else None
@@ -20,7 +21,14 @@ def vet_only():
     if get_jwt().get("role") != "Veterinarian":
         return None, createResult("Access Denied : Veterinarian Only", None)
     vet = current_vet()
-    return vet, None if vet else createResult("Veterinarian account not found", None)
+    if not vet:
+        return None, createResult("Veterinarian account not found", None)
+    v_status = vet.get("verification_status") or "Pending"
+    if v_status != "Approved":
+        if v_status == "Rejected":
+            return None, createResult("Your veterinarian account has not been approved.", None)
+        return None, createResult("Your veterinarian account is awaiting admin verification.", None)
+    return vet, None
 
 
 @vet_bp.route("/dashboard", methods=["GET"])

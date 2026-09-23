@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Circle,
   MapContainer,
@@ -72,15 +72,19 @@ export default function MapView() {
   const [farms, setFarms] = useState([]);
   const [outbreaks, setOutbreaks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [search, setSearch] = useState("");
   const [farmType, setFarmType] = useState("All");
   const [radiusFilter, setRadiusFilter] = useState("All");
   const [error, setError] = useState("");
+  const [lastRefreshed, setLastRefreshed] = useState(null);
+  const intervalRef = useRef(null);
 
-  const loadData = async () => {
+  const loadData = useCallback(async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
+      else setRefreshing(true);
       setError("");
 
       const [farmData, outbreakData] = await Promise.all([
@@ -106,16 +110,21 @@ export default function MapView() {
       );
 
       setOutbreaks(Array.isArray(outbreakData) ? outbreakData : []);
+      setLastRefreshed(new Date());
     } catch (err) {
       setError(err.message || "Unable to load geospatial map data.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void loadData();
-  }, []);
+    // Auto-refresh every 30 seconds so newly added farms appear
+    intervalRef.current = setInterval(() => void loadData(true), 30000);
+    return () => clearInterval(intervalRef.current);
+  }, [loadData]);
 
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -240,6 +249,15 @@ export default function MapView() {
             <span>{detecting ? "Detecting GPS..." : "Use My Current Location"}</span>
           </button>
 
+          <button
+            onClick={() => loadData(false)}
+            disabled={loading || refreshing}
+            className="btn-secondary text-xs"
+          >
+            <RefreshCcw size={15} className={(loading || refreshing) ? "animate-spin" : ""} />
+            <span>{refreshing ? "Refreshing..." : "Refresh Map"}</span>
+          </button>
+
           <Link
             className="btn-secondary text-xs"
             to="/vendor/nearby-farms"
@@ -248,6 +266,14 @@ export default function MapView() {
             <span>View Farms List</span>
           </Link>
         </div>
+      </div>
+
+      {/* Farm count + last refreshed */}
+      <div className="flex items-center gap-3 text-xs text-slate-500">
+        <span className="font-semibold text-slate-700">{farms.length} farms</span> on map
+        {lastRefreshed && (
+          <span className="ml-auto">Last updated: {lastRefreshed.toLocaleTimeString()}</span>
+        )}
       </div>
 
       {/* ── Filter Controls ── */}
@@ -297,6 +323,7 @@ export default function MapView() {
       {/* ── Map Surface ── */}
       <section className="h-[640px] overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-sm relative">
         <MapContainer
+          key={`${center[0]}-${center[1]}-${farms.length}`}
           center={center}
           zoom={12}
           scrollWheelZoom

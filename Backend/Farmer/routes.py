@@ -1,5 +1,19 @@
-from datetime import datetime
+import sys
+from pathlib import Path
+from datetime import datetime, timezone
 from flask import Blueprint, request
+from services.thingspeak_service import fetch_latest_telemetry
+from services.supabase_service import save_telemetry_record, get_latest_telemetry_from_db
+
+PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+try:
+    from Poultry_Guard_ML.environmental.inference.environmental_predictor import predict_environmental_disease
+except Exception as _ml_err:
+    print('[WARN] Could not import predict_environmental_disease:', _ml_err)
+    predict_environmental_disease = None
 from utlis.response import createResult
 from utlis.db_utlis import executeQuery
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
@@ -404,8 +418,8 @@ def hardware_kit_status():
         return createResult("Farmer account not found", None)
 
     assignments = executeQuery(
-        """SELECT hk.kit_code, hk.esp32_device_id, hk.pcb_serial_number,
-                  hk.firmware_version, hk.status, hk.installation_date, hk.last_seen_at,
+        """SELECT hk.hardware_kit_id, hk.kit_code, hk.esp32_device_id, hk.esp8266_device_id, hk.pcb_serial_number,
+                  hk.firmware_version, hk.status, hk.installation_date, hk.last_seen_at, hk.last_telemetry_at,
                   da.assigned_at
            FROM Device_Assignments da
            JOIN Hardware_Kits hk ON hk.hardware_kit_id=da.hardware_kit_id
@@ -466,3 +480,312 @@ def request_hardware_kit():
         (farmer["farmer_id"], farmer["farm_name"], farmer["address"], reason, priority),
     )
     return createResult(None, {"status": "Pending"})
+
+
+def get_farmer_active_kit(farmer_id):
+    """Retrieve the farmer's active hardware kit configuration without exposing keys to response."""
+    rows = executeQuery(
+        """SELECT hk.hardware_kit_id, hk.kit_code, hk.esp8266_device_id,
+                  hk.thingspeak_channel_id, hk.thingspeak_read_api_key,
+                  hk.last_telemetry_at, hk.last_seen_at, hk.status
+           FROM Device_Assignments da
+           JOIN Hardware_Kits hk ON hk.hardware_kit_id=da.hardware_kit_id
+           WHERE da.farmer_id=%s AND da.status='Active'
+           ORDER BY da.assigned_at DESC LIMIT 1""",
+        (farmer_id,)
+    )
+    return rows[0] if rows else None
+
+
+def get_or_sync_farmer_telemetry(farmer_id):
+    """
+    Fetches latest telemetry from ThingSpeak channel, persists to database (with deduplication),
+    or falls back to database records. Evaluates 300s freshness window.
+    """
+    kit = get_farmer_active_kit(farmer_id)
+    if not kit:
+        return None, "No active hardware kit assigned to this farm"
+
+    channel_id = kit.get("thingspeak_channel_id")
+    read_key = kit.get("thingspeak_read_api_key")
+    hid = kit["hardware_kit_id"]
+
+    latest_feed = None
+
+    if channel_id:
+        ts_res = fetch_latest_telemetry(channel_id, read_key)
+        if ts_res.get("success"):
+            latest_feed = ts_res
+            entry_id = ts_res.get("entry_id")
+            telem = ts_res.get("telemetry", {})
+            recorded_at_str = ts_res.get("recorded_at")
+
+            # Persist and deduplicate
+            try:
+                save_telemetry_record(
+                    hardware_kit_id=hid,
+                    farmer_id=farmer_id,
+                    thingspeak_entry_id=entry_id,
+                    temperature=telem.get("temperature"),
+                    humidity=telem.get("humidity"),
+                    ammonia=telem.get("ammonia"),
+                    vocalization_activity=telem.get("vocalization_activity"),
+                    raw_payload=ts_res.get("raw_feed"),
+                    recorded_at=recorded_at_str
+                )
+            except Exception as e:
+                print(f"[WARN] Error saving telemetry record: {e}")
+
+    # If live fetch failed or no channel, fall back to DB
+    if not latest_feed:
+        db_rec = get_latest_telemetry_from_db(hid)
+        if db_rec:
+            age_seconds = None
+            is_fresh = False
+            if db_rec.get("recorded_at"):
+                try:
+                    clean_str = str(db_rec["recorded_at"]).replace('Z', '+00:00')
+                    rec_dt = datetime.fromisoformat(clean_str)
+                    if rec_dt.tzinfo is None:
+                        rec_dt = rec_dt.replace(tzinfo=timezone.utc)
+                    age_seconds = max(0, int((datetime.now(timezone.utc) - rec_dt).total_seconds()))
+                    is_fresh = (age_seconds <= 300)
+                except Exception:
+                    age_seconds = None
+                    is_fresh = False
+
+            latest_feed = {
+                "success": True,
+                "entry_id": db_rec.get("thingspeak_entry_id"),
+                "recorded_at": db_rec.get("recorded_at"),
+                "age_seconds": age_seconds,
+                "is_fresh": is_fresh,
+                "device_status": "Online" if is_fresh else "Offline",
+                "telemetry": {
+                    "temperature": db_rec.get("temperature"),
+                    "humidity": db_rec.get("humidity"),
+                    "ammonia": db_rec.get("ammonia"),
+                    "vocalization_activity": db_rec.get("vocalization_activity")
+                }
+            }
+
+    if not latest_feed:
+        return {
+            "hardware_kit_id": hid,
+            "kit_code": kit["kit_code"],
+            "esp8266_device_id": kit.get("esp8266_device_id"),
+            "device_status": "Offline",
+            "is_fresh": False,
+            "freshness_status": "Stale",
+            "age_seconds": None,
+            "recorded_at": None,
+            "telemetry": None
+        }, None
+
+    is_fresh = latest_feed.get("is_fresh", False)
+    return {
+        "hardware_kit_id": hid,
+        "kit_code": kit["kit_code"],
+        "esp8266_device_id": kit.get("esp8266_device_id"),
+        "device_status": "Online" if is_fresh else "Offline",
+        "is_fresh": is_fresh,
+        "freshness_status": "Fresh" if is_fresh else "Stale",
+        "age_seconds": latest_feed.get("age_seconds"),
+        "recorded_at": latest_feed.get("recorded_at"),
+        "telemetry": latest_feed.get("telemetry")
+    }, None
+
+
+@farmer_bp.route("/telemetry", methods=["GET"])
+@jwt_required()
+def farmer_telemetry():
+    farmer, error = farmer_only()
+    if error: return error
+
+    data, err = get_or_sync_farmer_telemetry(farmer["farmer_id"])
+    if err:
+        return createResult(err, None)
+    return createResult(None, data)
+
+
+@farmer_bp.route("/device-status", methods=["GET"])
+@jwt_required()
+def farmer_device_status():
+    farmer, error = farmer_only()
+    if error: return error
+
+    data, err = get_or_sync_farmer_telemetry(farmer["farmer_id"])
+    if err:
+        return createResult(err, None)
+
+    return createResult(None, {
+        "hardware_kit_id": data["hardware_kit_id"],
+        "kit_code": data["kit_code"],
+        "esp8266_device_id": data["esp8266_device_id"],
+        "device_status": data["device_status"],
+        "is_fresh": data["is_fresh"],
+        "freshness_status": data["freshness_status"],
+        "age_seconds": data["age_seconds"],
+        "recorded_at": data["recorded_at"]
+    })
+
+
+@farmer_bp.route("/disease-status", methods=["GET"])
+@jwt_required()
+def farmer_disease_status():
+    farmer, error = farmer_only()
+    if error: return error
+
+    data, err = get_or_sync_farmer_telemetry(farmer["farmer_id"])
+    if err:
+        return createResult(err, None)
+
+    # Telemetry must be verified as fresh (<= 300s) before feeding into AI/ML model
+    if not data or not data.get("is_fresh") or not data.get("telemetry"):
+        return createResult(None, {
+            "telemetry_fresh": False,
+            "device_status": data.get("device_status", "Offline") if data else "Offline",
+            "age_seconds": data.get("age_seconds") if data else None,
+            "message": "Telemetry data is stale (> 300 seconds) or unavailable. Real-time inference excluded.",
+            "risk_level": "Unknown",
+            "predicted_class": "Unknown",
+            "recommendation": "Check IoT device connection and ensure the ESP8266 is transmitting telemetry."
+        })
+
+    telem = data["telemetry"]
+    temp = telem.get("temperature")
+    hum = telem.get("humidity")
+    amm = telem.get("ammonia")
+
+    if temp is None or hum is None:
+        return createResult(None, {
+            "telemetry_fresh": False,
+            "message": "Telemetry missing required temperature or humidity values.",
+            "risk_level": "Unknown",
+            "predicted_class": "Unknown",
+            "recommendation": "Ensure sensor hardware is operating normally."
+        })
+
+    if not predict_environmental_disease:
+        return createResult("Environmental ML predictor is not loaded.", None)
+
+    # Fetch farm parameters
+    breed = farmer.get("breed") or "Broiler Ross 308"
+    mort_data = mortality_analytics(farmer["farmer_id"])
+    mortality_rate = mort_data.get("mortality_rate", 0.5) if mort_data else 0.5
+
+    input_payload = {
+        "temperature": temp,
+        "humidity": hum,
+        "ammonia": amm if amm is not None else 10.0,
+        "breed": breed,
+        "mortality_rate": mortality_rate
+    }
+
+    try:
+        prediction = predict_environmental_disease(input_payload)
+        pred_class = prediction.get("predicted_class", "Healthy")
+        confidence = prediction.get("confidence", 0.0)
+        probs = prediction.get("probabilities", {})
+
+        recommendations = {
+            "Healthy": "Environmental conditions are optimal. Continue regular feeding and biosecurity sanitation protocols.",
+            "Infectious Coryza": "High risk of Infectious Coryza detected due to elevated ammonia/humidity. Inspect coop ventilation immediately, check birds for nasal discharge, and disinfect drinkers.",
+            "Fowlpox": "Environmental stress and flock indicators show risk of Fowlpox. Enhance mosquito/vector control and inspect birds for cutaneous or diphtheritic lesions."
+        }
+        rec_text = recommendations.get(pred_class, "Monitor flock health closely.")
+
+        return createResult(None, {
+            "telemetry_fresh": True,
+            "device_status": data["device_status"],
+            "age_seconds": data["age_seconds"],
+            "sensor_readings": telem,
+            "prediction": {
+                "predicted_class": pred_class,
+                "confidence": confidence,
+                "probabilities": probs,
+                "risk_level": "Low" if pred_class == "Healthy" else ("High" if confidence > 0.6 else "Medium"),
+                "recommendation": rec_text
+            }
+        })
+    except Exception as e:
+        return createResult(f"Error running disease prediction: {str(e)}", None)
+
+
+@farmer_bp.route("/wifi", methods=["GET"])
+@jwt_required()
+def farmer_wifi_get():
+    """Return the farmer's saved Wi-Fi SSID and a is_configured bool (password never exposed)."""
+    farmer, error = farmer_only()
+    if error: return error
+    fid = farmer["farmer_id"]
+    rows = executeQuery("SELECT wifi_ssid FROM Farmers WHERE farmer_id=%s", (fid,))
+    ssid = rows[0].get("wifi_ssid") if rows else None
+    return createResult(None, {
+        "wifi_ssid": ssid or "",
+        "is_configured": bool(ssid)
+    })
+
+
+@farmer_bp.route("/wifi", methods=["POST"])
+@jwt_required()
+def farmer_wifi_save():
+    """Save / update farm Wi-Fi SSID and password. Password is stored but never returned via API."""
+    farmer, error = farmer_only()
+    if error: return error
+    fid = farmer["farmer_id"]
+    data = request.get_json(silent=True) or {}
+    ssid = (data.get("wifi_ssid") or "").strip()
+    password = (data.get("wifi_password") or "").strip()
+    if not ssid:
+        return createResult("wifi_ssid is required", None)
+    # Update Farmers table
+    executeQuery("UPDATE Farmers SET wifi_ssid=%s, wifi_password=%s WHERE farmer_id=%s", (ssid, password or None, fid))
+    # Propagate to the active Hardware_Kit so the ESP8266 can fetch credentials
+    kit = get_farmer_active_kit(fid)
+    if kit:
+        executeQuery(
+            "UPDATE Hardware_Kits SET wifi_ssid=%s, wifi_password=%s WHERE hardware_kit_id=%s",
+            (ssid, password or None, kit["hardware_kit_id"])
+        )
+    return createResult(None, {"wifi_ssid": ssid, "is_configured": True})
+
+
+@farmer_bp.route("/hardware-kit/summary", methods=["GET"])
+@jwt_required()
+def hardware_kit_summary():
+    """Return the farmer's latest hardware assignment and latest request regardless of request status."""
+    if get_jwt().get("role") != "Farmer":
+        return createResult("Access Denied : Farmer Only", None)
+    farmer = current_farmer()
+    if not farmer:
+        return createResult("Farmer account not found", None)
+    fid = farmer["farmer_id"]
+
+    assignment = executeQuery(
+        """SELECT hk.hardware_kit_id, hk.kit_code, hk.esp32_device_id, hk.esp8266_device_id,
+                  hk.pcb_serial_number, hk.firmware_version, hk.status, hk.installation_date,
+                  hk.last_seen_at, hk.last_telemetry_at, da.assigned_at
+           FROM Device_Assignments da
+           JOIN Hardware_Kits hk ON hk.hardware_kit_id=da.hardware_kit_id
+           WHERE da.farmer_id=%s AND da.status='Active'
+           ORDER BY da.assigned_at DESC LIMIT 1""",
+        (fid,)
+    )
+    # Return the latest request regardless of status (Pending, Approved, Assigned, Rejected)
+    request_row = executeQuery(
+        """SELECT request_id, reason, priority, status, requested_at, updated_at
+           FROM Hardware_Assignment_Requests
+           WHERE farmer_id=%s
+           ORDER BY requested_at DESC LIMIT 1""",
+        (fid,)
+    )
+    # Wi-Fi config status
+    wifi_rows = executeQuery("SELECT wifi_ssid FROM Farmers WHERE farmer_id=%s", (fid,))
+    wifi_configured = bool(wifi_rows and wifi_rows[0].get("wifi_ssid"))
+
+    return createResult(None, {
+        "assignment": assignment[0] if assignment else None,
+        "request": request_row[0] if request_row else None,
+        "wifi_configured": wifi_configured
+    })

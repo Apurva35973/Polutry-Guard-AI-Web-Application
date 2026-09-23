@@ -4,8 +4,9 @@ import {
   LayoutDashboard,
   Users,
   Stethoscope,
-  Store,
+  BadgeCheck,
   Cpu,
+  Wifi,
   Bell,
   Activity,
   BarChart3,
@@ -14,6 +15,8 @@ import {
   ChevronRight,
   X,
   Shield,
+  ClipboardList,
+  PackageCheck,
 } from "lucide-react";
 
 const navItems = [
@@ -23,19 +26,19 @@ const navItems = [
     icon: LayoutDashboard,
   },
   {
-    label: "People",
+    label: "People & Farmers",
     path: "/admin/people",
     icon: Users,
   },
   {
-    label: "Manage Veterinarians",
+    label: "Veterinarians",
     path: "/admin/veterinarians",
     icon: Stethoscope,
   },
   {
-    label: "Manage Vendors",
-    path: "/admin/vendors",
-    icon: Store,
+    label: "Vet Verification",
+    path: "/admin/vet-verification",
+    icon: BadgeCheck,
   },
   {
     label: "Hardware Kits",
@@ -43,19 +46,24 @@ const navItems = [
     icon: Cpu,
   },
   {
-    label: "Support Center",
-    path: "/admin/support",
-    icon: Bell,
+    label: "Hardware Requests",
+    path: "/admin/hardware-requests",
+    icon: PackageCheck,
   },
   {
-    label: "Alerts Monitoring",
+    label: "ThingSpeak / Devices",
+    path: "/admin/devices",
+    icon: Wifi,
+  },
+  {
+    label: "Disease Alerts",
     path: "/admin/alerts",
     icon: Bell,
   },
   {
-    label: "Outbreak Monitoring",
-    path: "/admin/outbreaks",
-    icon: Activity,
+    label: "Support Center",
+    path: "/admin/support",
+    icon: ClipboardList,
   },
   {
     label: "Analytics",

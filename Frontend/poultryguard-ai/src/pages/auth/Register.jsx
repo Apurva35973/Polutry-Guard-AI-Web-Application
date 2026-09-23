@@ -15,6 +15,13 @@ export default function Register() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [vetFields, setVetFields] = useState({
+    license_number: "",
+    specialization: "Avian Medicine & Poultry Health",
+    hospital_clinic: "",
+    experience_years: "3",
+  });
+  const [certificateFile, setCertificateFile] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const navigate = useNavigate();
@@ -26,33 +33,59 @@ export default function Register() {
       return toast.warning("Required fields missing");
     }
 
-    const payload = {
-      full_name: name,
-      email,
-      phone_number: phone,
-      password,
-    };
+    if (role === "Veterinarian") {
+      if (!vetFields.license_number.trim()) {
+        return toast.warning("Veterinary license number is required");
+      }
+      if (!certificateFile) {
+        return toast.warning("Veterinary license or certificate document is required for verification");
+      }
+    }
 
     setLoading(true);
 
     try {
       let result;
       if (role === "Veterinarian") {
-        result = await registerVet(payload);
+        const formData = new FormData();
+        formData.append("full_name", name);
+        formData.append("email", email);
+        formData.append("phone_number", phone);
+        formData.append("password", password);
+        formData.append("license_number", vetFields.license_number.trim());
+        formData.append("specialization", vetFields.specialization);
+        formData.append("hospital_clinic", vetFields.hospital_clinic);
+        formData.append("experience_years", vetFields.experience_years);
+        formData.append("certificate", certificateFile);
+        result = await registerVet(formData);
       } else if (role === "Vendor") {
-        result = await registerVendor(payload);
+        result = await registerVendor({
+          full_name: name,
+          email,
+          phone_number: phone,
+          password,
+        });
       } else {
-        result = await registerFarmer(payload);
+        result = await registerFarmer({
+          full_name: name,
+          email,
+          phone_number: phone,
+          password,
+        });
       }
 
       if (result.status === "success") {
-        toast.success("Registered successfully");
+        if (role === "Veterinarian") {
+          toast.success("Veterinarian registration submitted! Your account is awaiting admin approval.");
+        } else {
+          toast.success("Registered successfully");
+        }
         navigate("/login");
       } else {
         toast.error(result.error || "Registration failed");
       }
     } catch (error) {
-      toast.error("Unable to register. Please try again.");
+      toast.error(error.response?.data?.error || "Unable to register. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -148,8 +181,74 @@ export default function Register() {
               />
             </div>
 
+            {role === "Veterinarian" && (
+              <div className="space-y-4 pt-2 border-t border-gray-100">
+                <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
+                  <span className="font-bold">⚠️ Notice:</span>
+                  <span>Veterinarian accounts require administrative verification. Please provide your professional credentials and license document for review.</span>
+                </div>
+
+                <div className="auth-field">
+                  <label htmlFor="vet-license">License / Registration Number *</label>
+                  <input
+                    id="vet-license"
+                    placeholder="e.g. VET-MH-2024-8842"
+                    value={vetFields.license_number}
+                    onChange={(e) => setVetFields({ ...vetFields, license_number: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="auth-field">
+                  <label htmlFor="vet-spec">Specialization</label>
+                  <input
+                    id="vet-spec"
+                    placeholder="e.g. Avian Pathology / Poultry Specialist"
+                    value={vetFields.specialization}
+                    onChange={(e) => setVetFields({ ...vetFields, specialization: e.target.value })}
+                  />
+                </div>
+
+                <div className="auth-field">
+                  <label htmlFor="vet-clinic">Hospital / Clinic Affiliation</label>
+                  <input
+                    id="vet-clinic"
+                    placeholder="e.g. National Avian Health Clinic"
+                    value={vetFields.hospital_clinic}
+                    onChange={(e) => setVetFields({ ...vetFields, hospital_clinic: e.target.value })}
+                  />
+                </div>
+
+                <div className="auth-field">
+                  <label htmlFor="vet-exp">Years of Experience</label>
+                  <input
+                    id="vet-exp"
+                    type="number"
+                    min="0"
+                    max="60"
+                    placeholder="e.g. 5"
+                    value={vetFields.experience_years}
+                    onChange={(e) => setVetFields({ ...vetFields, experience_years: e.target.value })}
+                  />
+                </div>
+
+                <div className="auth-field">
+                  <label htmlFor="vet-cert">Medical Certificate / License Document (PDF or Image) *</label>
+                  <input
+                    id="vet-cert"
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    onChange={(e) => setCertificateFile(e.target.files?.[0] || null)}
+                    required
+                    className="file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-[#166534] file:text-white hover:file:bg-[#14532d] cursor-pointer"
+                  />
+                  <p className="text-[11px] text-gray-500 mt-1">Accepted formats: PDF, JPG, PNG (Max 10MB)</p>
+                </div>
+              </div>
+            )}
+
             <button className="auth-primary-btn" type="submit" disabled={loading}>
-              {loading ? "Creating account..." : "Create account"}
+              {loading ? (role === "Veterinarian" ? "Submitting application..." : "Creating account...") : (role === "Veterinarian" ? "Submit Application" : "Create account")}
             </button>
           </form>
 

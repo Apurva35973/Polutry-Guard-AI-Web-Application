@@ -14,22 +14,29 @@ import {
   Download,
   Droplets,
   Eye,
+  EyeOff,
   FileText,
   HeartPulse,
   Info,
+  Key,
+  Lock,
   MapPin,
   Navigation,
   Pencil,
   Plus,
   Printer,
+  Radio,
   RefreshCcw,
   Shield,
   ShieldAlert,
   ShieldCheck,
   Thermometer,
   Trash2,
+  Unlock,
   Upload,
   User,
+  Wifi,
+  WifiOff,
   Wind,
   X,
   Zap,
@@ -54,11 +61,15 @@ import {
   generateFarmReport,
   getFarmerAlerts,
   getFarmerProfile,
+  getFarmerWifi,
+  getHardwareKitSummary,
   getMortality,
   getMortalityAnalytics,
   getMyDevices,
   getReminders,
   logMortality,
+  requestHardwareKit,
+  saveFarmerWifi,
   screenChickenImage,
   updateFarmerAlert,
   updateFarmerProfile,
@@ -229,6 +240,18 @@ export default function FarmerOperations({ page }) {
   const [aiResult, setAiResult] = useState(null);
   const [diseaseHistory, setDiseaseHistory] = useState([]);
 
+  // Wi-Fi Configuration & Hardware State
+  const [wifiConfig, setWifiConfig] = useState({
+    wifi_ssid: "",
+    wifi_password: "",
+    is_configured: false,
+    configured_at: null,
+  });
+  const [showWifiPassword, setShowWifiPassword] = useState(false);
+  const [savingWifi, setSavingWifi] = useState(false);
+  const [hardwareSummary, setHardwareSummary] = useState(null);
+  const [requestingKit, setRequestingKit] = useState(false);
+
   // Profile Geolocation State
   const [detectingLocation, setDetectingLocation] = useState(false);
   const [profileForm, setProfileForm] = useState({
@@ -267,8 +290,24 @@ export default function FarmerOperations({ page }) {
         const res = await getFarmerAlerts();
         setData(res.data || []);
       } else if (page === "devices") {
-        const res = await getMyDevices();
-        setData(res.data || []);
+        const [devRes, wifiRes, summaryRes] = await Promise.all([
+          getMyDevices().catch(() => ({ data: [] })),
+          getFarmerWifi().catch(() => ({ data: {} })),
+          getHardwareKitSummary().catch(() => ({ data: null })),
+        ]);
+        setData(devRes.data || []);
+        if (wifiRes?.data) {
+          setWifiConfig((prev) => ({
+            ...prev,
+            wifi_ssid: wifiRes.data.wifi_ssid || "",
+            wifi_password: "",
+            is_configured: Boolean(wifiRes.data.is_configured),
+            configured_at: wifiRes.data.configured_at || null,
+          }));
+        }
+        if (summaryRes?.data) {
+          setHardwareSummary(summaryRes.data);
+        }
       } else if (page === "profile") {
         const res = await getFarmerProfile();
         if (res.data) {
@@ -328,6 +367,60 @@ export default function FarmerOperations({ page }) {
   useEffect(() => {
     void load();
   }, [page]);
+
+  // ==========================================
+  // HARDWARE & WI-FI HANDLERS
+  // ==========================================
+  const handleSaveWifi = async (e) => {
+    e.preventDefault();
+    if (!wifiConfig.wifi_ssid.trim()) {
+      toast.warning("Wi-Fi SSID (network name) is required.");
+      return;
+    }
+    if (!wifiConfig.wifi_password) {
+      toast.warning("Wi-Fi Password is required.");
+      return;
+    }
+    setSavingWifi(true);
+    try {
+      const res = await saveFarmerWifi({
+        wifi_ssid: wifiConfig.wifi_ssid.trim(),
+        wifi_password: wifiConfig.wifi_password,
+      });
+      if (res?.status === 200 || !res?.error) {
+        toast.success("Wi-Fi credentials saved and updated on your hardware kit!");
+        setWifiConfig((prev) => ({
+          ...prev,
+          is_configured: true,
+          wifi_password: "",
+        }));
+        void load();
+      } else {
+        toast.error(res?.error || "Failed to save Wi-Fi configuration.");
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Failed to save Wi-Fi configuration.");
+    } finally {
+      setSavingWifi(false);
+    }
+  };
+
+  const handleRequestKit = async () => {
+    setRequestingKit(true);
+    try {
+      const res = await requestHardwareKit({ notes: "Farmer requested via Devices dashboard" });
+      if (res?.status === 200 || !res?.error) {
+        toast.success("Hardware kit request submitted to Admin!");
+        void load();
+      } else {
+        toast.error(res?.error || "Failed to request kit.");
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || "Failed to submit request.");
+    } finally {
+      setRequestingKit(false);
+    }
+  };
 
   // ==========================================
   // 1. REMINDERS HANDLERS
@@ -1527,67 +1620,285 @@ export default function FarmerOperations({ page }) {
       )}
 
       {page === "devices" && (
-        <section className="bg-white rounded-2xl shadow-sm border border-gray-200/80 p-6 sm:p-8">
-          <div className="flex items-center justify-between border-b border-gray-100 pb-4 mb-6">
-            <div>
-              <h2 className="font-bold text-gray-900 text-lg flex items-center gap-2">
-                <Cpu className="text-[#166534]" size={20} />
-                Connected Hardware Kits
-              </h2>
-              <p className="text-xs text-gray-500 mt-0.5">
-                IoT telemetry devices reporting temperature, humidity, and ammonia
-              </p>
-            </div>
-          </div>
+        <div className="space-y-8 animate-fade-in">
+          {/* ── Hardware Assignment Status Card ── */}
+          <section className="bg-white rounded-2xl shadow-sm border border-gray-200/80 p-6 sm:p-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-5 mb-6">
+              <div>
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-400">
+                  Hardware Logistics
+                </span>
+                <h2 className="text-xl font-black text-gray-900 flex items-center gap-2 mt-0.5">
+                  <Cpu className="text-[#166534]" size={22} />
+                  Hardware Kit Assignment Status
+                </h2>
+                <p className="text-xs text-gray-500 mt-1">
+                  Track the provisioning and deployment status of your PoultryGuard IoT sensor kit.
+                </p>
+              </div>
 
-          {data.length ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {data.map((x) => (
-                <div
-                  key={x.kit_code}
-                  className="rounded-2xl border border-gray-200 bg-gray-50/70 p-6 hover:bg-white hover:shadow-sm transition-all"
+              {hardwareSummary?.status ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-gray-500">Status:</span>
+                  <span
+                    className={`text-xs font-extrabold px-3 py-1.5 rounded-full uppercase tracking-wider ${
+                      hardwareSummary.status === "Assigned"
+                        ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                        : hardwareSummary.status === "Approved"
+                        ? "bg-blue-100 text-blue-800 border border-blue-200"
+                        : hardwareSummary.status === "Rejected"
+                        ? "bg-red-100 text-red-800 border border-red-200"
+                        : "bg-amber-100 text-amber-800 border border-amber-200"
+                    }`}
+                  >
+                    {hardwareSummary.status}
+                  </span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleRequestKit}
+                  disabled={requestingKit}
+                  className="btn text-xs py-2.5 px-4 shadow-sm"
                 >
-                  <div className="flex items-center justify-between gap-2 mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 rounded-xl bg-emerald-100 border border-emerald-200 text-[#166534] flex items-center justify-center font-black">
-                        <Cpu size={22} />
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-black text-gray-900">
-                          {x.kit_code}
-                        </h3>
-                        <p className="text-xs text-gray-500 font-medium">
-                          ESP32: {x.esp32_device_id || "Registered"}
-                        </p>
-                      </div>
-                    </div>
-                    <StatusBadge
-                      status={x.status || "ONLINE"}
-                      label={x.status || "Online"}
-                    />
-                  </div>
+                  <Plus size={15} />
+                  <span>{requestingKit ? "Submitting..." : "Request Hardware Kit"}</span>
+                </button>
+              )}
+            </div>
 
-                  <div className="grid grid-cols-2 gap-3 text-xs bg-white p-3.5 rounded-xl border border-gray-200">
-                    <div>
-                      <span className="text-gray-400 font-semibold uppercase">Firmware</span>
-                      <p className="font-bold text-gray-800 mt-0.5">{x.firmware_version || "v2.1.0"}</p>
-                    </div>
-                    <div>
-                      <span className="text-gray-400 font-semibold uppercase">Last Heartbeat</span>
-                      <p className="font-bold text-gray-800 mt-0.5">{formatTimestamp(x.last_seen_at)}</p>
-                    </div>
+            {hardwareSummary?.status ? (
+              <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 text-xs space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <span className="text-gray-400 font-semibold uppercase text-[10px]">Request ID</span>
+                    <p className="font-bold text-gray-800 mt-0.5">#{hardwareSummary.request_id || "REQ-01"}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-400 font-semibold uppercase text-[10px]">Submitted Date</span>
+                    <p className="font-bold text-gray-800 mt-0.5">{formatTimestamp(hardwareSummary.requested_at || hardwareSummary.created_at)}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-400 font-semibold uppercase text-[10px]">Assigned Kit Code</span>
+                    <p className="font-extrabold text-[#166534] mt-0.5">{hardwareSummary.assigned_kit_code || hardwareSummary.kit_code || "Pending Allocation"}</p>
                   </div>
                 </div>
-              ))}
+
+                {hardwareSummary.status === "Pending" && (
+                  <div className="p-3 bg-amber-50 rounded-lg border border-amber-200 text-amber-900 text-xs flex items-center gap-2">
+                    <Clock size={16} className="text-amber-600 shrink-0" />
+                    <span>Your hardware request has been submitted to the Admin team. Once approved, a physical sensor kit will be assigned and shipped to your farm.</span>
+                  </div>
+                )}
+                {hardwareSummary.status === "Rejected" && (
+                  <div className="p-3 bg-red-50 rounded-lg border border-red-200 text-red-900 text-xs flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle size={16} className="text-red-600 shrink-0" />
+                      <span>Your previous hardware request was rejected. You can submit a new request if needed.</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRequestKit}
+                      disabled={requestingKit}
+                      className="btn text-xs py-1 px-3"
+                    >
+                      {requestingKit ? "Submitting..." : "Re-request Kit"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-5 rounded-xl bg-blue-50/70 border border-blue-200 text-blue-950 text-xs flex items-center justify-between flex-wrap gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                    <Radio size={18} />
+                  </div>
+                  <div>
+                    <p className="font-bold">No active Hardware Kit request found</p>
+                    <p className="text-blue-800 text-[11px] mt-0.5">Request an ESP8266 telemetry sensing device to automatically monitor temperature, humidity, and ammonia.</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRequestKit}
+                  disabled={requestingKit}
+                  className="btn text-xs py-2 px-4 shadow-sm"
+                >
+                  <Plus size={14} />
+                  <span>{requestingKit ? "Submitting..." : "Request Hardware Kit"}</span>
+                </button>
+              </div>
+            )}
+          </section>
+
+          {/* ── Connected Hardware Kits ── */}
+          <section className="bg-white rounded-2xl shadow-sm border border-gray-200/80 p-6 sm:p-8">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-4 mb-6">
+              <div>
+                <h2 className="font-bold text-gray-900 text-lg flex items-center gap-2">
+                  <Cpu className="text-[#166534]" size={20} />
+                  Connected Physical Sensor Kits
+                </h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  ESP8266 / ESP32 microcontrollers deployed in your chicken coops
+                </p>
+              </div>
+              <span className="text-xs font-bold text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
+                {data.length} {data.length === 1 ? "Device" : "Devices"}
+              </span>
             </div>
-          ) : (
-            <EmptyState
-              icon={Cpu}
-              title="No Hardware Kit Assigned"
-              description="No physical ESP32 sensing kit is currently assigned to this farm profile."
-            />
-          )}
-        </section>
+
+            {data.length ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {data.map((x) => (
+                  <div
+                    key={x.kit_code || x.hardware_kit_id}
+                    className="rounded-2xl border border-gray-200 bg-gray-50/70 p-6 hover:bg-white hover:shadow-sm transition-all"
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-xl bg-emerald-100 border border-emerald-200 text-[#166534] flex items-center justify-center font-black">
+                          <Cpu size={22} />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-black text-gray-900">
+                            {x.kit_code}
+                          </h3>
+                          <p className="text-xs text-gray-500 font-medium">
+                            Device ID: {x.esp8266_device_id || x.esp32_device_id || "ESP8266-PG"}
+                          </p>
+                        </div>
+                      </div>
+                      <StatusBadge
+                        status={x.status || "ONLINE"}
+                        label={x.status || "Online"}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 text-xs bg-white p-3.5 rounded-xl border border-gray-200">
+                      <div>
+                        <span className="text-gray-400 font-semibold uppercase">Firmware</span>
+                        <p className="font-bold text-gray-800 mt-0.5">{x.firmware_version || "v2.4.0"}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-400 font-semibold uppercase">Last Heartbeat</span>
+                        <p className="font-bold text-gray-800 mt-0.5">{formatTimestamp(x.last_seen_at || x.last_telemetry_at)}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                icon={Cpu}
+                title="No Hardware Kit Assigned"
+                description="No physical ESP8266 sensing kit is currently assigned to this farm profile."
+              />
+            )}
+          </section>
+
+          {/* ── Shed Wi-Fi Provisioning Configuration Form ── */}
+          <section className="bg-white rounded-2xl shadow-sm border border-gray-200/80 p-6 sm:p-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-5 mb-6">
+              <div>
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-gray-400">
+                  Network Connectivity
+                </span>
+                <h2 className="text-xl font-black text-gray-900 flex items-center gap-2 mt-0.5">
+                  <Wifi className="text-[#166534]" size={22} />
+                  Shed Wi-Fi Configuration (ESP8266)
+                </h2>
+                <p className="text-xs text-gray-500 mt-1">
+                  Configure local farm Wi-Fi credentials for your ESP8266 IoT device to transmit telemetry to ThingSpeak.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-gray-500">Provisioning Status:</span>
+                {wifiConfig.is_configured ? (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-extrabold px-3 py-1.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    <CheckCircle2 size={13} />
+                    Configured
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-extrabold px-3 py-1.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                    <WifiOff size={13} />
+                    Not Configured
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveWifi} className="max-w-2xl space-y-5">
+              <div className="space-y-1.5">
+                <label className="text-xs font-extrabold uppercase tracking-wider text-gray-700 flex items-center gap-1.5">
+                  <Wifi size={14} className="text-[#166534]" />
+                  Wi-Fi SSID (Network Name)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Farm_Shed_2.4GHz"
+                  value={wifiConfig.wifi_ssid}
+                  onChange={(e) => setWifiConfig((prev) => ({ ...prev, wifi_ssid: e.target.value }))}
+                  className="input-field w-full text-sm font-medium"
+                  required
+                />
+                <p className="text-[11px] text-gray-400">
+                  Must be a 2.4 GHz wireless network (ESP8266 does not support 5 GHz networks).
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-extrabold uppercase tracking-wider text-gray-700 flex items-center gap-1.5">
+                  <Lock size={14} className="text-[#166534]" />
+                  Wi-Fi Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={showWifiPassword ? "text" : "password"}
+                    placeholder={wifiConfig.is_configured ? "•••••••• (Enter new password to update)" : "Enter Wi-Fi password"}
+                    value={wifiConfig.wifi_password}
+                    onChange={(e) => setWifiConfig((prev) => ({ ...prev, wifi_password: e.target.value }))}
+                    className="input-field w-full text-sm font-medium pr-10"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowWifiPassword(!showWifiPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none"
+                    title={showWifiPassword ? "Hide password" : "Show password"}
+                  >
+                    {showWifiPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+                <p className="text-[11px] text-gray-400">
+                  Passwords are securely stored and synced directly to your assigned hardware kit.
+                </p>
+              </div>
+
+              <div className="p-4 bg-emerald-50/60 rounded-xl border border-emerald-200 text-xs text-emerald-950 flex items-start gap-2.5">
+                <Info size={16} className="text-[#166534] shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold">Automated Hardware Provisioning</p>
+                  <p className="text-emerald-900 text-[11px] mt-0.5">
+                    Saving new credentials updates the database and applies to your assigned hardware kit so the ESP8266 can connect automatically when powered on.
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={savingWifi}
+                  className="btn text-sm py-3 px-6 shadow-sm flex items-center gap-2"
+                >
+                  <Key size={16} />
+                  <span>{savingWifi ? "Saving Wi-Fi Configuration..." : "Save / Update Wi-Fi Configuration"}</span>
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
       )}
 
       {page === "profile" && (

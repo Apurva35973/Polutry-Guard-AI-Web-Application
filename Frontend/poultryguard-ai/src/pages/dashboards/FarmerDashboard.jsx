@@ -46,6 +46,9 @@ import {
   getFarmerDashboard,
   getHardwareKitStatus,
   requestHardwareKit,
+  getFarmerTelemetry,
+  getFarmerDeviceStatus,
+  getFarmerDiseaseStatus,
 } from "../../services/farmerService";
 import { completeFarmerProfile } from "../../services/authService";
 
@@ -296,6 +299,9 @@ function FarmerDashboard() {
     assignment: null,
     request: null,
   });
+  const [iotTelemetry, setIotTelemetry] = useState(null);
+  const [iotDisease, setIotDisease] = useState(null);
+  const [iotLoading, setIotLoading] = useState(false);
   const [farmSummary, setFarmSummary] = useState(null);
   const [requestingKit, setRequestingKit] = useState(false);
   const [showProfileForm, setShowProfileForm] = useState(() => {
@@ -356,6 +362,26 @@ function FarmerDashboard() {
     }
   }, []);
 
+  const loadIoT = useCallback(async () => {
+    setIotLoading(true);
+    try {
+      const [telemRes, diseaseRes] = await Promise.allSettled([
+        getFarmerTelemetry(),
+        getFarmerDiseaseStatus(),
+      ]);
+      if (telemRes.status === "fulfilled" && telemRes.value?.status === "success") {
+        setIotTelemetry(telemRes.value.data);
+      }
+      if (diseaseRes.status === "fulfilled" && diseaseRes.value?.status === "success") {
+        setIotDisease(diseaseRes.value.data);
+      }
+    } catch {
+      // Non-blocking
+    } finally {
+      setIotLoading(false);
+    }
+  }, []);
+
   const submitHardwareRequest = async () => {
     setRequestingKit(true);
     try {
@@ -387,13 +413,16 @@ function FarmerDashboard() {
     const initialLoad = window.setTimeout(() => {
       void loadDashboard();
       void loadHardware();
+      void loadIoT();
     }, 0);
     const interval = window.setInterval(loadDashboard, 5 * 60 * 1000);
+    const iotInterval = window.setInterval(loadIoT, 30 * 1000); // 30-second telemetry polling
     return () => {
       window.clearTimeout(initialLoad);
       window.clearInterval(interval);
+      window.clearInterval(iotInterval);
     };
-  }, [loadDashboard, loadHardware]);
+  }, [loadDashboard, loadHardware, loadIoT]);
 
   const runRiskPrediction = async () => {
     if (environment?.temperature == null || environment?.humidity == null) {
@@ -472,22 +501,32 @@ function FarmerDashboard() {
   const kpiCards = [
     {
       title: "Temperature",
-      value: environment?.temperature != null ? `${environment.temperature}°C` : "—",
+      value:
+        iotTelemetry?.telemetry?.temperature != null
+          ? `${iotTelemetry.telemetry.temperature}°C`
+          : environment?.temperature != null
+          ? `${environment.temperature}°C`
+          : "—",
       icon: Thermometer,
       color:
-        envStatus === "CRITICAL"
+        (iotTelemetry?.telemetry?.temperature ?? environment?.temperature ?? 22) > 32
           ? "red"
-          : envStatus === "WARNING"
+          : (iotTelemetry?.telemetry?.temperature ?? environment?.temperature ?? 22) > 28
           ? "orange"
           : "green",
-      subtitle: "Optimal: 20–26°C",
+      subtitle: iotTelemetry?.telemetry?.temperature != null ? "ESP8266 IoT Live" : "Optimal: 20–26°C",
     },
     {
       title: "Humidity",
-      value: environment?.humidity != null ? `${environment.humidity}%` : "—",
+      value:
+        iotTelemetry?.telemetry?.humidity != null
+          ? `${iotTelemetry.telemetry.humidity}%`
+          : environment?.humidity != null
+          ? `${environment.humidity}%`
+          : "—",
       icon: Droplets,
       color: "blue",
-      subtitle: "Optimal: 50–70%",
+      subtitle: iotTelemetry?.telemetry?.humidity != null ? "ESP8266 IoT Live" : "Optimal: 50–70%",
     },
     {
       title: "Environment",
@@ -503,15 +542,19 @@ function FarmerDashboard() {
     },
     {
       title: "AI Risk Level",
-      value: risk?.risk_level || "Normal",
+      value:
+        iotDisease?.prediction?.predicted_class ||
+        (iotDisease?.telemetry_fresh === false ? "Stale Data" : (risk?.risk_level || "Normal")),
       icon: ShieldAlert,
       color:
-        risk?.risk_level === "High"
+        iotDisease?.prediction?.predicted_class === "Healthy"
+          ? "emerald"
+          : iotDisease?.prediction?.risk_level === "High"
           ? "red"
-          : risk?.risk_level === "Medium"
-          ? "orange"
-          : "emerald",
-      subtitle: risk ? `Score: ${Math.round(risk.risk_score * 100)}%` : "AI screening model",
+          : "orange",
+      subtitle: iotDisease?.prediction?.confidence
+        ? `${Math.round(iotDisease.prediction.confidence * 100)}% Confidence`
+        : "IoT + ML Inference",
     },
     {
       title: "Today's Mortality",
@@ -523,19 +566,21 @@ function FarmerDashboard() {
     {
       title: "Ammonia Level",
       value:
-        environment?.ammonia != null
+        iotTelemetry?.telemetry?.ammonia != null
+          ? `${iotTelemetry.telemetry.ammonia} ppm`
+          : environment?.ammonia != null
           ? `${environment.ammonia} ppm`
           : farmSummary?.environment?.ammonia != null
           ? `${farmSummary.environment.ammonia} ppm`
           : "— ppm",
       icon: Wind,
       color:
-        (environment?.ammonia || 0) > 25
+        (iotTelemetry?.telemetry?.ammonia ?? environment?.ammonia ?? 0) > 25
           ? "red"
-          : (environment?.ammonia || 0) > 15
+          : (iotTelemetry?.telemetry?.ammonia ?? environment?.ammonia ?? 0) > 15
           ? "orange"
           : "lime",
-      subtitle: "Safe threshold: < 20 ppm",
+      subtitle: iotTelemetry?.telemetry?.ammonia != null ? "ESP8266 MQ-137 Sensor" : "Safe threshold: < 20 ppm",
     },
     {
       title: "Active Alerts",
@@ -555,10 +600,18 @@ function FarmerDashboard() {
     },
     {
       title: "Active Devices",
-      value: hardware.assignment ? "1 Online" : "0 Connected",
+      value:
+        iotTelemetry?.device_status === "Online"
+          ? "1 Online"
+          : hardware.assignment
+          ? "1 Offline"
+          : "0 Connected",
       icon: Cpu,
-      color: hardware.assignment ? "lime" : "emerald",
-      subtitle: hardware.assignment?.kit_code || "IoT sensor hardware",
+      color: iotTelemetry?.device_status === "Online" ? "lime" : hardware.assignment ? "orange" : "emerald",
+      subtitle:
+        iotTelemetry?.freshness_status
+          ? `Telemetry: ${iotTelemetry.freshness_status}`
+          : hardware.assignment?.kit_code || "IoT sensor hardware",
     },
   ];
 
@@ -753,33 +806,142 @@ function FarmerDashboard() {
             </div>
 
             {hardware.assignment ? (
-              <div className="mt-5 grid grid-cols-2 gap-4">
-                <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                  <p className="text-xs font-semibold text-gray-500 uppercase">Kit Code</p>
-                  <p className="text-base font-extrabold text-gray-900 mt-1">
-                    {hardware.assignment.kit_code}
-                  </p>
+              <div className="mt-5 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-500 uppercase">Status:</span>
+                    <span
+                      className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                        iotTelemetry?.device_status === "Online"
+                          ? "bg-green-100 text-green-700"
+                          : "bg-red-100 text-red-700"
+                      }`}
+                    >
+                      {iotTelemetry?.device_status || (hardware.assignment.status === "Assigned" ? "Active" : hardware.assignment.status)}
+                    </span>
+                    <span
+                      className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                        iotTelemetry?.is_fresh
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-amber-100 text-amber-800"
+                      }`}
+                    >
+                      {iotTelemetry?.freshness_status || "Checking Freshness..."}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={loadIoT}
+                    disabled={iotLoading}
+                    className="text-xs font-bold text-[#166534] hover:underline flex items-center gap-1"
+                  >
+                    <RefreshCcw size={12} className={iotLoading ? "animate-spin" : ""} />
+                    {iotLoading ? "Syncing..." : "Sync IoT"}
+                  </button>
                 </div>
-                <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                  <p className="text-xs font-semibold text-gray-500 uppercase">ESP32 Device ID</p>
-                  <p className="text-base font-extrabold text-gray-900 mt-1 truncate">
-                    {hardware.assignment.esp32_device_id}
-                  </p>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                    <p className="text-xs font-semibold text-gray-500 uppercase">Temp</p>
+                    <p className="text-lg font-extrabold text-gray-900 mt-1">
+                      {iotTelemetry?.telemetry?.temperature != null
+                        ? `${iotTelemetry.telemetry.temperature} °C`
+                        : "—"}
+                    </p>
+                  </div>
+                  <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                    <p className="text-xs font-semibold text-gray-500 uppercase">Humidity</p>
+                    <p className="text-lg font-extrabold text-gray-900 mt-1">
+                      {iotTelemetry?.telemetry?.humidity != null
+                        ? `${iotTelemetry.telemetry.humidity} %`
+                        : "—"}
+                    </p>
+                  </div>
+                  <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                    <p className="text-xs font-semibold text-gray-500 uppercase">Ammonia (NH3)</p>
+                    <p className="text-lg font-extrabold text-gray-900 mt-1">
+                      {iotTelemetry?.telemetry?.ammonia != null
+                        ? `${iotTelemetry.telemetry.ammonia} ppm`
+                        : "—"}
+                    </p>
+                  </div>
+                  <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
+                    <p className="text-xs font-semibold text-gray-500 uppercase">Vocalization</p>
+                    <p className="text-lg font-extrabold text-gray-900 mt-1">
+                      {iotTelemetry?.telemetry?.vocalization_activity != null
+                        ? `${iotTelemetry.telemetry.vocalization_activity}`
+                        : "—"}
+                    </p>
+                  </div>
                 </div>
-                <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                  <p className="text-xs font-semibold text-gray-500 uppercase">Firmware</p>
-                  <p className="text-sm font-bold text-gray-800 mt-1">
-                    {hardware.assignment.firmware_version || "v2.1.0-prod"}
-                  </p>
+
+                <div className="grid grid-cols-2 gap-3 text-xs text-slate-600 bg-white p-3 rounded-xl border border-gray-200">
+                  <div>
+                    <span className="font-semibold text-slate-400">Kit Code:</span>{" "}
+                    <span className="font-bold text-slate-800">{hardware.assignment.kit_code}</span>
+                  </div>
+                  <div>
+                    <span className="font-semibold text-slate-400">ESP8266 ID:</span>{" "}
+                    <span className="font-bold text-slate-800">
+                      {hardware.assignment.esp8266_device_id || hardware.assignment.esp32_device_id}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="font-semibold text-slate-400">Firmware:</span>{" "}
+                    <span>{hardware.assignment.firmware_version || "v2.1.0-prod"}</span>
+                  </div>
+                  <div>
+                    <span className="font-semibold text-slate-400">Telemetry Age:</span>{" "}
+                    <span>
+                      {iotTelemetry?.age_seconds != null
+                        ? `${iotTelemetry.age_seconds}s ago`
+                        : hardware.assignment.last_telemetry_at
+                        ? formatTime(hardware.assignment.last_telemetry_at)
+                        : "Active"}
+                    </span>
+                  </div>
                 </div>
-                <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                  <p className="text-xs font-semibold text-gray-500 uppercase">Last Telemetry</p>
-                  <p className="text-sm font-bold text-gray-800 mt-1">
-                    {hardware.assignment.last_seen_at
-                      ? formatTime(hardware.assignment.last_seen_at)
-                      : "Receiving live"}
-                  </p>
-                </div>
+
+                {/* AI Disease Inference based on IoT Sensor Data */}
+                {iotDisease && (
+                  <div
+                    className={`rounded-xl p-4 border text-xs leading-relaxed ${
+                      iotDisease.telemetry_fresh
+                        ? iotDisease.prediction?.predicted_class === "Healthy"
+                          ? "bg-emerald-50 border-emerald-200 text-emerald-950"
+                          : "bg-amber-50 border-amber-200 text-amber-950"
+                        : "bg-slate-50 border-slate-200 text-slate-600"
+                    }`}
+                  >
+                    {iotDisease.telemetry_fresh ? (
+                      <div>
+                        <div className="flex items-center justify-between font-bold">
+                          <span className="uppercase tracking-wider">
+                            AI Outbreak Risk: {iotDisease.prediction?.predicted_class}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-white font-mono shadow-2xs">
+                            {Math.round((iotDisease.prediction?.confidence || 0) * 100)}% Confidence
+                          </span>
+                        </div>
+                        <p className="mt-1.5 font-medium">
+                          {iotDisease.prediction?.recommendation}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-2">
+                        <Info size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-bold text-amber-900">
+                            Telemetry Stale (&gt; 300s) — Real-Time Inference Excluded
+                          </p>
+                          <p className="mt-0.5 text-amber-800">
+                            {iotDisease.recommendation || "Ensure your ESP8266 sensor is powered on and connected to the shed Wi-Fi."}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : hardware.request ? (
               <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-5">
@@ -980,83 +1142,6 @@ function FarmerDashboard() {
             title="No Active Alerts"
             description="Your farm's environmental sensors are currently operating within safe biosecurity thresholds."
           />
-        )}
-      </section>
-
-      {/* ── Image Disease Screening Section ── */}
-      <section className="bg-white rounded-2xl shadow-sm border border-gray-200/80 p-6">
-        <div className="border-b border-gray-100 pb-4 mb-5">
-          <h2 className="font-bold text-gray-900 text-lg flex items-center gap-2">
-            <Camera className="text-[#166534]" size={20} />
-            AI Image Disease Screening & Early Warning
-          </h2>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Upload a flock droppings or bird photo to run the trained computer vision disease model.
-          </p>
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-center gap-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
-          <input
-            type="file"
-            accept="image/*"
-            onChange={(event) => setImageFile(event.target.files?.[0] || null)}
-            className="block w-full text-sm text-gray-600 file:mr-4 file:rounded-xl file:border-0 file:bg-[#166534] file:px-4 file:py-2.5 file:text-xs file:font-bold file:text-white hover:file:bg-[#14532d] file:cursor-pointer cursor-pointer"
-          />
-          <button
-            type="button"
-            disabled={loading || !imageFile}
-            onClick={runMlPrediction}
-            className="btn shrink-0 w-full sm:w-auto"
-          >
-            <Camera size={17} />
-            <span>{loading ? "Analyzing..." : "Analyze Image"}</span>
-          </button>
-        </div>
-
-        {mlResult && (
-          <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-4 animate-fade-in">
-            <div className="rounded-2xl border border-blue-200 bg-blue-50/70 p-5 shadow-xs">
-              <p className="text-xs font-bold uppercase text-blue-800">
-                Image Disease Model
-              </p>
-              <p className="text-xl font-extrabold text-blue-950 mt-1">
-                {mlResult.image_model.predicted_disease}
-              </p>
-              <div className="mt-3 flex items-center justify-between text-xs text-blue-900">
-                <span>Model Confidence:</span>
-                <span className="font-extrabold">
-                  {(mlResult.image_model.confidence * 100).toFixed(1)}%
-                </span>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-5 shadow-xs">
-              <p className="text-xs font-bold uppercase text-amber-800">
-                Environment Model
-              </p>
-              <p className="text-xl font-extrabold text-amber-950 mt-1">
-                {mlResult.environmental_model.risk_level} Risk
-              </p>
-              <div className="mt-3 flex items-center justify-between text-xs text-amber-900">
-                <span>Risk Score:</span>
-                <span className="font-extrabold">
-                  {(mlResult.environmental_model.risk_score * 100).toFixed(1)}%
-                </span>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5 shadow-xs">
-              <p className="text-xs font-bold uppercase text-emerald-800">
-                Ensemble Alert
-              </p>
-              <p className="text-xl font-extrabold text-emerald-950 mt-1">
-                {mlResult.ensemble.alert_level}
-              </p>
-              <p className="mt-2 text-xs text-emerald-900 font-medium leading-relaxed">
-                {mlResult.ensemble.message}
-              </p>
-            </div>
-          </div>
         )}
       </section>
 

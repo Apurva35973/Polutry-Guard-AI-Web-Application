@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
+import { AlertCircle } from "lucide-react";
 import { loginUser } from "../../services/authService";
 
 export default function Login() {
@@ -8,11 +9,18 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("Vendor");
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const navigate = useNavigate();
 
+  const handleRoleChange = (newRole) => {
+    setRole(newRole);
+    setErrorMessage("");
+  };
+
   const handleLogin = async (e) => {
     e.preventDefault();
+    setErrorMessage("");
 
     if (!email || !password) {
       return toast.warning("Email and password required");
@@ -46,10 +54,14 @@ export default function Login() {
         else if (result.data.role === "Vendor") navigate("/vendor/dashboard");
         else navigate("/admin/dashboard");
       } else {
-        toast.error(result.error || "Login failed");
+        const msg = result.error || "Login failed";
+        setErrorMessage(msg);
+        toast.error(msg);
       }
-    } catch {
-      toast.error("Unable to login. Please try again.");
+    } catch (err) {
+      const msg = err.response?.data?.error || "Unable to login. Please check your credentials.";
+      setErrorMessage(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -98,7 +110,7 @@ export default function Login() {
                   <button
                     className={role === item ? "auth-role active" : "auth-role"}
                     key={item}
-                    onClick={() => setRole(item)}
+                    onClick={() => handleRoleChange(item)}
                     type="button"
                   >
                     {item}
@@ -114,7 +126,10 @@ export default function Login() {
                 type="email"
                 placeholder="you@example.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (errorMessage) setErrorMessage("");
+                }}
                 autoComplete="email"
               />
             </div>
@@ -126,10 +141,23 @@ export default function Login() {
                 type="password"
                 placeholder="Enter your password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (errorMessage) setErrorMessage("");
+                }}
                 autoComplete="current-password"
               />
             </div>
+
+            {errorMessage && (
+              <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs flex items-start gap-2.5 my-2 animate-fade-in shadow-xs">
+                <AlertCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <span className="font-bold">Authentication Notice: </span>
+                  {errorMessage}
+                </div>
+              </div>
+            )}
 
             <button className="auth-primary-btn" type="submit" disabled={loading}>
               {loading ? "Signing in..." : "Sign in"}

@@ -5,6 +5,8 @@ from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 import re
 from datetime import datetime
 from flask_cors import CORS
+from services.thingspeak_service import test_thingspeak_connection, mask_api_key, fetch_latest_telemetry
+from services.supabase_service import get_latest_telemetry_from_db
 
 
 admin_bp = Blueprint('admin',__name__)
@@ -384,6 +386,17 @@ def add_device():
 
     result = executeQuery(query, params)
 
+    # Automatically sync into Hardware_Kits inventory so kit is available for assignment
+    esp32_id = (request.json.get("esp32_id") or "").strip()
+    if esp32_id:
+        existing_kit = executeQuery("SELECT hardware_kit_id FROM Hardware_Kits WHERE kit_code=%s OR esp32_device_id=%s", (esp32_id, esp32_id))
+        if not existing_kit:
+            esp8266_id = esp32_id.replace("KIT-", "ESP8266-") if "KIT-" in esp32_id else f"ESP8266-{esp32_id}"
+            executeQuery("""
+                INSERT INTO Hardware_Kits (kit_code, esp32_device_id, esp8266_device_id, status, firmware_version, created_at, updated_at)
+                VALUES (%s, %s, %s, 'Available', %s, NOW(), NOW())
+            """, (esp32_id, esp32_id, esp8266_id, "v2.4.0"))
+
     return createResult(None, result)
 
 @admin_bp.route("/device/update", methods=["PUT"])
@@ -542,6 +555,7 @@ def overview():
         (SELECT COUNT(*) FROM Alerts WHERE acknowledged=FALSE) active_alerts,
         (SELECT COUNT(*) FROM Veterinarians) total_veterinarians,
         (SELECT COUNT(*) FROM Veterinarians WHERE status IN ('Available','Busy')) active_veterinarians,
+        (SELECT COUNT(*) FROM Veterinarians WHERE verification_status='Pending') pending_vet_verifications,
         (SELECT COUNT(*) FROM Hardware_Assignment_Requests WHERE status='Pending') pending_assignment_requests,
         (SELECT COUNT(*) FROM Support_Tickets WHERE status IN ('Open','In Progress')) open_support_tickets
     """
@@ -600,7 +614,45 @@ def list_hardware_kits():
     rows = executeQuery(f"""SELECT hk.*, f.full_name AS assigned_farmer, f.farm_name, f.address AS location,
         {status_sql} AS device_status FROM Hardware_Kits hk
         LEFT JOIN Farmers f ON f.farmer_id=hk.assigned_farmer_id ORDER BY hk.created_at DESC""", None)
+    for r in rows:
+        r["is_thingspeak_configured"] = bool(r.get("thingspeak_channel_id"))
+        if r.get("thingspeak_read_api_key"):
+            r["thingspeak_read_api_key_masked"] = mask_api_key(r["thingspeak_read_api_key"])
+        if r.get("thingspeak_write_api_key"):
+            r["thingspeak_write_api_key_masked"] = mask_api_key(r["thingspeak_write_api_key"])
     return createResult(None, rows)
+
+
+@admin_bp.route("/hardware-kits", methods=["POST"])
+@jwt_required()
+def create_hardware_kit():
+    denied = admin_only()
+    if denied: return denied
+    data = request.get_json(silent=True) or {}
+    kit_code = (data.get("kit_code") or "").strip().upper()
+    if not kit_code:
+        return createResult("kit_code is required", None)
+
+    existing = executeQuery("SELECT hardware_kit_id FROM Hardware_Kits WHERE kit_code=%s", (kit_code,))
+    if existing:
+        return createResult(f"Hardware kit with code '{kit_code}' already exists", None)
+
+    esp8266_id = (data.get("esp8266_device_id") or "").strip() or (kit_code.replace("KIT-", "ESP8266-") if "KIT-" in kit_code else f"ESP8266-{kit_code}")
+    esp32_id = (data.get("esp32_device_id") or "").strip() or kit_code
+    firmware_version = (data.get("firmware_version") or "").strip() or "v2.4.0"
+    channel_id = (data.get("thingspeak_channel_id") or "").strip() or None
+    read_key = (data.get("thingspeak_read_api_key") or "").strip() or None
+    write_key = (data.get("thingspeak_write_api_key") or "").strip() or None
+
+    executeQuery("""
+        INSERT INTO Hardware_Kits
+        (kit_code, esp8266_device_id, esp32_device_id, firmware_version, status,
+         thingspeak_channel_id, thingspeak_read_api_key, thingspeak_write_api_key, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, 'Available', %s, %s, %s, NOW(), NOW())
+    """, (kit_code, esp8266_id, esp32_id, firmware_version, channel_id, read_key, write_key))
+
+    new_kit = executeQuery("SELECT * FROM Hardware_Kits WHERE kit_code=%s", (kit_code,))
+    return createResult(None, new_kit[0] if new_kit else {"kit_code": kit_code})
 
 
 @admin_bp.route("/hardware-kits/available", methods=["GET"])
@@ -632,9 +684,21 @@ def assign_kit(data, replacement_reason=None):
         return None, "Hardware kit is not available for assignment"
     if not farmer[0]["farm_name"]: return None, "Farmer does not have an authorized farm profile"
     admin_id = get_jwt().get("user_id")
+    thingspeak_channel_id = data.get("thingspeak_channel_id") or None
+    thingspeak_read_api_key = data.get("thingspeak_read_api_key") or None
+    thingspeak_write_api_key = data.get("thingspeak_write_api_key") or None
+    esp8266_device_id = data.get("esp8266_device_id") or None
+
     executeQuery("""UPDATE Hardware_Kits SET status='Assigned', assigned_farmer_id=%s,
-        assigned_at=NOW(), installation_date=COALESCE(%s, installation_date) WHERE hardware_kit_id=%s""",
-        (data["farmer_id"], data.get("installation_date") or None, data["hardware_kit_id"]))
+        assigned_at=NOW(), installation_date=COALESCE(%s, installation_date),
+        thingspeak_channel_id=COALESCE(%s, thingspeak_channel_id),
+        thingspeak_read_api_key=COALESCE(%s, thingspeak_read_api_key),
+        thingspeak_write_api_key=COALESCE(%s, thingspeak_write_api_key),
+        esp8266_device_id=COALESCE(%s, esp8266_device_id)
+        WHERE hardware_kit_id=%s""",
+        (data["farmer_id"], data.get("installation_date") or None,
+         thingspeak_channel_id, thingspeak_read_api_key, thingspeak_write_api_key, esp8266_device_id,
+         data["hardware_kit_id"]))
     executeQuery("""INSERT INTO Device_Assignments (hardware_kit_id, farmer_id, farm_name_snapshot, assigned_by_admin_id, replacement_reason)
         VALUES (%s,%s,%s,%s,%s)""", (data["hardware_kit_id"], data["farmer_id"], farmer[0]["farm_name"], admin_id, replacement_reason))
     if data.get("request_id"):
@@ -728,3 +792,226 @@ def record_hardware_heartbeat(hardware_kit_id):
     executeQuery("UPDATE Hardware_Kits SET last_seen_at=NOW() WHERE hardware_kit_id=%s", (hardware_kit_id,))
     executeQuery("INSERT INTO Device_Heartbeats (hardware_kit_id) VALUES (%s)", (hardware_kit_id,))
     return createResult(None, {"hardware_kit_id": hardware_kit_id, "received": True})
+
+
+@admin_bp.route("/hardware-kits/<int:hardware_kit_id>/thingspeak", methods=["POST"])
+@jwt_required()
+def configure_thingspeak(hardware_kit_id):
+    denied = admin_only()
+    if denied: return denied
+
+    data = request.get_json(silent=True) or {}
+    channel_id = (data.get("thingspeak_channel_id") or "").strip() or None
+    read_api_key = (data.get("thingspeak_read_api_key") or "").strip() or None
+    write_api_key = (data.get("thingspeak_write_api_key") or "").strip() or None
+    esp8266_device_id = (data.get("esp8266_device_id") or "").strip() or None
+
+    kit = executeQuery("SELECT hardware_kit_id FROM Hardware_Kits WHERE hardware_kit_id=%s", (hardware_kit_id,))
+    if not kit:
+        return createResult("Hardware kit not found", None)
+
+    executeQuery("""
+        UPDATE Hardware_Kits
+        SET thingspeak_channel_id=%s,
+            thingspeak_read_api_key=COALESCE(%s, thingspeak_read_api_key),
+            thingspeak_write_api_key=COALESCE(%s, thingspeak_write_api_key),
+            esp8266_device_id=COALESCE(%s, esp8266_device_id)
+        WHERE hardware_kit_id=%s
+    """, (channel_id, read_api_key, write_api_key, esp8266_device_id, hardware_kit_id))
+
+    updated_rows = executeQuery("SELECT * FROM Hardware_Kits WHERE hardware_kit_id=%s", (hardware_kit_id,))
+    updated_kit = updated_rows[0] if updated_rows else {}
+
+    return createResult(None, {
+        "hardware_kit_id": hardware_kit_id,
+        "thingspeak_channel_id": updated_kit.get("thingspeak_channel_id"),
+        "thingspeak_read_api_key_masked": mask_api_key(updated_kit.get("thingspeak_read_api_key")),
+        "thingspeak_write_api_key_masked": mask_api_key(updated_kit.get("thingspeak_write_api_key")),
+        "esp8266_device_id": updated_kit.get("esp8266_device_id"),
+        "updated": True
+    })
+
+
+@admin_bp.route("/hardware-kits/<int:hardware_kit_id>/thingspeak/test", methods=["POST"])
+@jwt_required()
+def test_thingspeak(hardware_kit_id):
+    denied = admin_only()
+    if denied: return denied
+
+    data = request.get_json(silent=True) or {}
+    channel_id = (data.get("thingspeak_channel_id") or "").strip() or None
+    read_api_key = (data.get("thingspeak_read_api_key") or "").strip() or None
+
+    # Always fetch stored credentials from DB so we can fill gaps:
+    # - channel_id not sent → use stored channel_id AND stored read_api_key
+    # - channel_id sent but read_api_key not sent → use stored read_api_key as fallback
+    kit = executeQuery(
+        "SELECT thingspeak_channel_id, thingspeak_read_api_key FROM Hardware_Kits WHERE hardware_kit_id=%s",
+        (hardware_kit_id,)
+    )
+    if not kit:
+        return createResult("Hardware kit not found", None)
+
+    stored_channel_id = kit[0].get("thingspeak_channel_id")
+    stored_read_key = kit[0].get("thingspeak_read_api_key")
+
+    # Prefer request-provided values; fall back to stored values
+    channel_id = channel_id or stored_channel_id
+    read_api_key = read_api_key or stored_read_key
+
+    if not channel_id:
+        return createResult("ThingSpeak Channel ID has not been provided or configured for this kit.", None)
+
+    test_result = test_thingspeak_connection(channel_id, read_api_key)
+    if not test_result.get("success"):
+        return createResult(test_result.get("error", "ThingSpeak connection failed"), None)
+
+    return createResult(None, test_result)
+
+
+@admin_bp.route("/profile", methods=["GET"])
+@jwt_required()
+def get_admin_profile():
+    denied = admin_only()
+    if denied: return denied
+    admin_id = get_jwt().get("user_id")
+    rows = executeQuery(
+        "SELECT admin_id, full_name, email, phone_number, role, created_at FROM Admins WHERE admin_id=%s",
+        (admin_id,)
+    )
+    if not rows:
+        return createResult("Admin not found", None)
+    return createResult(None, rows[0])
+
+
+@admin_bp.route("/profile/update", methods=["PUT"])
+@admin_bp.route("/profile", methods=["PUT"])
+@jwt_required()
+def update_admin_profile():
+    denied = admin_only()
+    if denied: return denied
+    admin_id = get_jwt().get("user_id")
+    data = request.get_json(silent=True) or {}
+    allowed = ("full_name", "phone_number", "email")
+    changes = {k: v for k, v in data.items() if k in allowed and v is not None}
+    if not changes:
+        return createResult("No updatable fields provided", None)
+    set_clause = ", ".join(f"{k}=%s" for k in changes)
+    executeQuery(f"UPDATE Admins SET {set_clause} WHERE admin_id=%s", tuple(changes.values()) + (admin_id,))
+    rows = executeQuery("SELECT admin_id, full_name, email, phone_number, role FROM Admins WHERE admin_id=%s", (admin_id,))
+    return createResult(None, rows[0] if rows else {"updated": True})
+
+
+@admin_bp.route("/veterinarians/applications", methods=["GET"])
+@jwt_required()
+def vet_applications():
+    denied = admin_only()
+    if denied: return denied
+    rows = executeQuery(
+        """SELECT vet_id, full_name, email, phone_number, specialization, license_number,
+                  experience_years, hospital_clinic, verification_status, certificate_url,
+                  created_at
+           FROM Veterinarians
+           ORDER BY FIELD(verification_status, 'Pending', 'Approved', 'Rejected'), created_at DESC""",
+        None
+    )
+    return createResult(None, rows)
+
+
+@admin_bp.route("/veterinarians/<int:vet_id>/verify", methods=["POST"])
+@jwt_required()
+def verify_vet(vet_id):
+    denied = admin_only()
+    if denied: return denied
+    data = request.get_json(silent=True) or {}
+    new_status = data.get("verification_status", "").strip()
+    if new_status not in {"Approved", "Rejected"}:
+        return createResult("verification_status must be 'Approved' or 'Rejected'", None)
+    vet = executeQuery("SELECT vet_id, full_name FROM Veterinarians WHERE vet_id=%s", (vet_id,))
+    if not vet:
+        return createResult("Veterinarian not found", None)
+    executeQuery("UPDATE Veterinarians SET verification_status=%s WHERE vet_id=%s", (new_status, vet_id))
+    return createResult(None, {"vet_id": vet_id, "full_name": vet[0]["full_name"], "verification_status": new_status})
+
+
+@admin_bp.route("/veterinarians/<string:filename>/certificate", methods=["GET"])
+@admin_bp.route("/veterinarians/certificate/<string:filename>", methods=["GET"])
+@jwt_required()
+def serve_vet_certificate(filename):
+    denied = admin_only()
+    if denied: return denied
+    import os
+    from flask import send_from_directory
+    cert_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads", "certificates")
+    if not os.path.isfile(os.path.join(cert_dir, filename)):
+        return createResult("Certificate file not found", None)
+    return send_from_directory(cert_dir, filename)
+
+
+@admin_bp.route("/assignment-requests/<int:request_id>/status", methods=["POST"])
+@jwt_required()
+def update_assignment_request_status(request_id):
+    denied = admin_only()
+    if denied: return denied
+    data = request.get_json(silent=True) or {}
+    new_status = (data.get("status") or "").strip()
+    if new_status not in {"Approved", "Rejected"}:
+        return createResult("status must be 'Approved' or 'Rejected'", None)
+    req = executeQuery("SELECT request_id, farmer_id, status FROM Hardware_Assignment_Requests WHERE request_id=%s", (request_id,))
+    if not req:
+        return createResult("Assignment request not found", None)
+    if req[0]["status"] not in ("Pending",):
+        return createResult(f"Request is already in status '{req[0]['status']}' and cannot be changed", None)
+    executeQuery("UPDATE Hardware_Assignment_Requests SET status=%s, updated_at=NOW() WHERE request_id=%s", (new_status, request_id))
+    return createResult(None, {"request_id": request_id, "status": new_status})
+
+
+@admin_bp.route("/hardware-kits/<int:hardware_kit_id>/thingspeak/status", methods=["GET"])
+@jwt_required()
+def thingspeak_kit_status(hardware_kit_id):
+    denied = admin_only()
+    if denied: return denied
+
+    kit = executeQuery(
+        """SELECT hk.hardware_kit_id, hk.kit_code, hk.status, hk.assigned_farmer_id,
+                  hk.thingspeak_channel_id, hk.thingspeak_read_api_key, hk.thingspeak_write_api_key,
+                  hk.esp8266_device_id, hk.last_telemetry_at, hk.last_seen_at,
+                  f.full_name AS farmer_name, f.farm_name
+           FROM Hardware_Kits hk
+           LEFT JOIN Farmers f ON f.farmer_id=hk.assigned_farmer_id
+           WHERE hk.hardware_kit_id=%s""",
+        (hardware_kit_id,)
+    )
+    if not kit:
+        return createResult("Hardware kit not found", None)
+
+    row = kit[0]
+    channel_id = row.get("thingspeak_channel_id")
+    read_key = row.get("thingspeak_read_api_key")
+
+    latest_telemetry = None
+    if channel_id:
+        fetch_res = fetch_latest_telemetry(channel_id, read_key)
+        if fetch_res.get("success"):
+            latest_telemetry = fetch_res
+        else:
+            latest_telemetry = get_latest_telemetry_from_db(hardware_kit_id)
+    else:
+        latest_telemetry = get_latest_telemetry_from_db(hardware_kit_id)
+
+    response_data = {
+        "hardware_kit_id": row["hardware_kit_id"],
+        "kit_code": row["kit_code"],
+        "esp8266_device_id": row.get("esp8266_device_id"),
+        "thingspeak_channel_id": channel_id,
+        "is_thingspeak_configured": bool(channel_id),
+        "thingspeak_read_api_key_masked": mask_api_key(read_key),
+        "thingspeak_write_api_key_masked": mask_api_key(row.get("thingspeak_write_api_key")),
+        "assigned_farmer": row.get("farmer_name"),
+        "farm_name": row.get("farm_name"),
+        "last_telemetry_at": str(row.get("last_telemetry_at")) if row.get("last_telemetry_at") else None,
+        "last_seen_at": str(row.get("last_seen_at")) if row.get("last_seen_at") else None,
+        "latest_telemetry": latest_telemetry
+    }
+    return createResult(None, response_data)
+

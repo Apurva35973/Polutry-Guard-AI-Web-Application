@@ -22,11 +22,13 @@ export const registerFarmer = async (data) => {
   return response.data;
 };
 
-// VET REGISTER
+// VET REGISTER — supports FormData (with certificate file) or plain JSON
 export const registerVet = async (data) => {
+  const isFormData = data instanceof FormData;
   const response = await axios.post(
     `${API_URL}/auth/register/vet`,
-    data
+    data,
+    isFormData ? { headers: { "Content-Type": "multipart/form-data" } } : {}
   );
 
   return response.data;

@@ -1,6 +1,6 @@
-from pathlib import Path
+﻿from pathlib import Path
 
-from flask import Flask
+from flask import Flask, send_from_directory
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -58,83 +58,60 @@ def create_app():
     )
 
     # JWT Configuration
-
     app.config["JWT_SECRET_KEY"] = "poultry_guard_secret"
     app.config["DEVICE_OFFLINE_TIMEOUT_SECONDS"] = int(
-        os.getenv("DEVICE_OFFLINE_TIMEOUT_SECONDS", "120")
+        os.getenv("DEVICE_OFFLINE_TIMEOUT_SECONDS", "300")
     )
 
     jwt_mgr = JWTManager(app)
 
     # Register Blueprints
-
     app.register_blueprint(auth_bp, url_prefix="/auth")
-
     app.register_blueprint(admin_bp, url_prefix="/admin")
-
     app.register_blueprint(farmer_bp, url_prefix="/farmer")
-
     app.register_blueprint(vet_bp, url_prefix="/vet")
-
     app.register_blueprint(device_bp, url_prefix="/devices")
-
     app.register_blueprint(disease_bp, url_prefix="/disease")
-
     app.register_blueprint(alert_bp, url_prefix="/alerts")
-
-    app.register_blueprint(vendor_bp,url_prefix="/vendor")
-
+    app.register_blueprint(vendor_bp, url_prefix="/vendor")
     app.register_blueprint(environment_bp, url_prefix="/api")
 
-    # JWT Error Handlers
+    # Public static file route for vet certificates (no JWT required)
+    # Filenames are UUIDs so they are not guessable.
+    @app.route("/public/certificates/<path:filename>", methods=["GET"])
+    def serve_certificate_public(filename):
+        cert_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "uploads", "certificates"
+        )
+        if not os.path.isfile(os.path.join(cert_dir, filename)):
+            return createResult("Certificate file not found", None), 404
+        return send_from_directory(cert_dir, filename)
 
+    # JWT Error Handlers
     @jwt_mgr.invalid_token_loader
     def invalid_token_handler(error):
-        return createResult(
-            error="Invalid JWT Token",
-            data=None
-        )
+        return createResult(error="Invalid JWT Token", data=None)
 
     @jwt_mgr.unauthorized_loader
     def unauthorized_handler(error):
-        return createResult(
-            error="JWT Token Missing",
-            data=None
-        )
+        return createResult(error="JWT Token Missing", data=None)
 
     @jwt_mgr.expired_token_loader
     def expired_token_handler(jwt_header, jwt_payload):
-        return createResult(
-            error="JWT Token Expired",
-            data=None
-        )
+        return createResult(error="JWT Token Expired", data=None)
 
     # Global Error Handlers
-
     @app.errorhandler(500)
     def handle_500(error):
-
         err = getattr(error, "original_exception", error)
-
-        return createResult(
-            error=repr(err),
-            data=None
-        )
+        return createResult(error=repr(err), data=None)
 
     @app.errorhandler(404)
     def handle_404(error):
-
-        return createResult(
-            error="Endpoint Not Found",
-            data=None
-        )
+        return createResult(error="Endpoint Not Found", data=None)
 
     @app.errorhandler(400)
     def handle_400(error):
-
-        return createResult(
-            error=str(error.description),
-            data=None
-        )
+        return createResult(error=str(error.description), data=None)
 
     return app

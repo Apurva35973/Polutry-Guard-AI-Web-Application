@@ -51,6 +51,7 @@ export const getPeopleFarmers = (params = {}) => adminApi.get("/admin/farmers", 
 export const getPeopleVeterinarians = () => adminApi.get("/admin/veterinarians").then(unwrap);
 export const getHardwareKits = () => adminApi.get("/admin/hardware-kits").then(unwrap);
 export const getAvailableHardwareKits = () => adminApi.get("/admin/hardware-kits/available").then(unwrap);
+export const createHardwareKit = (data) => adminApi.post("/admin/hardware-kits", data).then(unwrap);
 export const getAssignmentRequests = () => adminApi.get("/admin/assignment-requests").then(unwrap);
 export const assignHardwareKit = (data) => adminApi.post("/admin/hardware-kits/assign", data).then(unwrap);
 export const replaceHardwareKit = (data) => adminApi.post("/admin/hardware-kits/replace", data).then(unwrap);
@@ -58,6 +59,9 @@ export const getAssignmentHistory = () => adminApi.get("/admin/assignments/histo
 export const getDiseaseAlerts = () => adminApi.get("/admin/disease-alerts").then(unwrap);
 export const getSupportTickets = () => adminApi.get("/admin/support-tickets").then(unwrap);
 export const updateSupportTicket = (id, data) => adminApi.patch(`/admin/support-tickets/${id}`, data).then(unwrap);
+export const configureHardwareThingSpeak = (id, data) => adminApi.post(`/admin/hardware-kits/${id}/thingspeak`, data).then(unwrap);
+export const testHardwareThingSpeak = (id, data = {}) => adminApi.post(`/admin/hardware-kits/${id}/thingspeak/test`, data).then(unwrap);
+export const getHardwareThingSpeakStatus = (id) => adminApi.get(`/admin/hardware-kits/${id}/thingspeak/status`).then(unwrap);
 
 // ─── Farmers ─────────────────────────────────────────────────────────────────
 export const getAllFarmers = () =>
@@ -129,5 +133,16 @@ export const getAdminProfile = () =>
 
 export const updateAdminProfile = (data) =>
   adminApi.put("/admin/profile/update", data).then(unwrap);
+
+// ─── Veterinarian Applications / Verification ─────────────────────────────────
+export const getVetApplications = () =>
+  adminApi.get("/admin/veterinarians/applications").then(unwrap);
+
+export const verifyVetApplication = (vetId, status) =>
+  adminApi.post(`/admin/veterinarians/${vetId}/verify`, { verification_status: status }).then(unwrap);
+
+// ─── Assignment Request Status ─────────────────────────────────────────────────
+export const updateAssignmentRequestStatus = (requestId, status) =>
+  adminApi.post(`/admin/assignment-requests/${requestId}/status`, { status }).then(unwrap);
 
 export default adminApi;

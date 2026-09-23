@@ -29,3 +29,9 @@ export const getFarmerProfile = () => axios.get(`${API_URL}/farmer/profile`, aut
 export const updateFarmerProfile = (data) => axios.put(`${API_URL}/farmer/profile`, data, authConfig()).then(unwrap);
 export const getMyDevices = () => axios.get(`${API_URL}/farmer/devices`, authConfig()).then(unwrap);
 export const generateFarmReport = (data) => axios.post(`${API_URL}/farmer/reports/generate`, data, authConfig()).then(unwrap);
+export const getFarmerTelemetry = () => axios.get(`${API_URL}/farmer/telemetry`, authConfig()).then(unwrap);
+export const getFarmerDeviceStatus = () => axios.get(`${API_URL}/farmer/device-status`, authConfig()).then(unwrap);
+export const getFarmerDiseaseStatus = () => axios.get(`${API_URL}/farmer/disease-status`, authConfig()).then(unwrap);
+export const getFarmerWifi = () => axios.get(`${API_URL}/farmer/wifi`, authConfig()).then(unwrap);
+export const saveFarmerWifi = (data) => axios.post(`${API_URL}/farmer/wifi`, data, authConfig()).then(unwrap);
+export const getHardwareKitSummary = () => axios.get(`${API_URL}/farmer/hardware-kit/summary`, authConfig()).then(unwrap);
