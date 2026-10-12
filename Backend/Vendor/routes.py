@@ -1,6 +1,7 @@
 from flask import Flask,request,Blueprint
 from utlis.response import createResult
 from utlis.db_utlis import executeQuery
+from services.sync_service import sync_and_outbox
 from flask_jwt_extended import jwt_manager,jwt_required,get_jwt
 import re
 from datetime import datetime
@@ -74,6 +75,7 @@ def update_profile():
     )
 
     result = executeQuery(query, params)
+    sync_and_outbox("Vendors", vendor_id, "UPDATE")
 
     return createResult(None, result)
 

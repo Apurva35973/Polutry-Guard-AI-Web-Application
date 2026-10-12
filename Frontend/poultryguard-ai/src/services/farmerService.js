@@ -21,6 +21,14 @@ export const updateFarmerAlert = (id, data) => axios.patch(`${API_URL}/farmer/al
 export const createSupportRequest = (data) => axios.post(`${API_URL}/farmer/support-requests`, data, authConfig()).then(unwrap);
 export const createVeterinarianRequest = (data) => axios.post(`${API_URL}/farmer/veterinarian-requests`, data, authConfig()).then(unwrap);
 export const screenChickenImage = (image) => { const body = new FormData(); body.append("image", image); return axios.post(`${API_URL}/farmer/disease-prediction`, body, authConfig()).then(unwrap); };
+export const getPoultryImages = () => axios.get(`${API_URL}/farmer/poultry-images`, authConfig()).then(unwrap);
+export const uploadPoultryImage = (image, source = "Manual_Upload", deviceId = null) => {
+  const body = new FormData();
+  body.append("image", image);
+  if (source) body.append("source", source);
+  if (deviceId) body.append("device_id", deviceId);
+  return axios.post(`${API_URL}/farmer/poultry-images`, body, authConfig()).then(unwrap);
+};
 export const getReminders = () => axios.get(`${API_URL}/farmer/reminders`, authConfig()).then(unwrap);
 export const createReminder = (data) => axios.post(`${API_URL}/farmer/reminders`, data, authConfig()).then(unwrap);
 export const updateReminder = (id, data) => axios.put(`${API_URL}/farmer/reminders/${id}`, data, authConfig()).then(unwrap);
@@ -35,3 +43,4 @@ export const getFarmerDiseaseStatus = () => axios.get(`${API_URL}/farmer/disease
 export const getFarmerWifi = () => axios.get(`${API_URL}/farmer/wifi`, authConfig()).then(unwrap);
 export const saveFarmerWifi = (data) => axios.post(`${API_URL}/farmer/wifi`, data, authConfig()).then(unwrap);
 export const getHardwareKitSummary = () => axios.get(`${API_URL}/farmer/hardware-kit/summary`, authConfig()).then(unwrap);
+export const getFarmerConsultations = () => axios.get(`${API_URL}/farmer/consultations`, authConfig()).then(unwrap);

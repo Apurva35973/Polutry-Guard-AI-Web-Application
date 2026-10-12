@@ -114,6 +114,9 @@ import "react-toastify/dist/ReactToastify.css";
 // Context
 import { AuthProvider } from "./context/AuthContext";
 
+// Public Pages
+import LandingPage from "./pages/public/LandingPage";
+
 // Auth Pages
 import Login from "./pages/auth/Login";
 import Register from "./pages/auth/Register";
@@ -171,9 +174,9 @@ function App() {
       <BrowserRouter>
         <Routes>
 
-          {/* ================= AUTH ================= */}
+          {/* ================= PUBLIC & AUTH ================= */}
 
-          <Route path="/" element={<Login />} />
+          <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
 

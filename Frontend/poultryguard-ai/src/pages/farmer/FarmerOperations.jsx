@@ -66,6 +66,7 @@ import {
   getMortality,
   getMortalityAnalytics,
   getMyDevices,
+  getPoultryImages,
   getReminders,
   logMortality,
   requestHardwareKit,
@@ -239,6 +240,8 @@ export default function FarmerOperations({ page }) {
   const [aiScanning, setAiScanning] = useState(false);
   const [aiResult, setAiResult] = useState(null);
   const [diseaseHistory, setDiseaseHistory] = useState([]);
+  const [uploadedImages, setUploadedImages] = useState([]);
+  const [viewingImage, setViewingImage] = useState(null);
 
   // Wi-Fi Configuration & Hardware State
   const [wifiConfig, setWifiConfig] = useState({
@@ -354,11 +357,15 @@ export default function FarmerOperations({ page }) {
 
   const loadHealthData = async () => {
     try {
-      const [currentEnv, hist] = await Promise.all([
+      const [currentEnv, hist, imagesRes] = await Promise.all([
         getCurrentEnvironment(farmId),
         getEnvironmentHistory(farmId, 20),
+        getPoultryImages().catch(() => ({ data: [] })),
       ]);
       setEnvironment(currentEnv);
+      if (imagesRes?.data) {
+        setUploadedImages(imagesRes.data);
+      }
     } catch {
       // non-blocking
     }
@@ -561,17 +568,12 @@ export default function FarmerOperations({ page }) {
       const res = await screenChickenImage(selectedImage);
       if (res.status === "success") {
         setAiResult(res.data);
-        toast.success("AI Health Analysis completed successfully.");
-        // Add to local history list
-        setDiseaseHistory((prev) => [
-          {
-            disease: res.data.predicted_disease || res.data.predicted_class,
-            confidence: res.data.confidence,
-            risk: res.data.risk_level,
-            timestamp: new Date().toISOString(),
-          },
-          ...prev,
-        ]);
+        toast.success("AI Health Analysis completed & stored in cloud.");
+        // Refresh cloud-stored images list
+        try {
+          const imgsRes = await getPoultryImages();
+          if (imgsRes?.data) setUploadedImages(imgsRes.data);
+        } catch (_) {}
       } else {
         toast.error(res.error || "AI screening failed. Please try again.");
       }
@@ -1534,6 +1536,131 @@ export default function FarmerOperations({ page }) {
               </div>
             </section>
           </div>
+
+          {/* Cloud-Stored Poultry Screenings Gallery */}
+          <section className="bg-white rounded-2xl shadow-sm border border-gray-200/80 p-6 sm:p-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+              <div>
+                <h3 className="font-bold text-gray-900 text-lg">
+                  Recent Cloud-Stored Flock Screenings
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Private Supabase Storage captures and automated ResNet-18 diagnostic classifications
+                </p>
+              </div>
+              <span className="text-xs font-semibold px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 self-start sm:self-auto">
+                {uploadedImages.length} {uploadedImages.length === 1 ? "Image" : "Images"} Recorded
+              </span>
+            </div>
+
+            {uploadedImages.length === 0 ? (
+              <div className="text-center py-12 px-4 rounded-xl border border-dashed border-gray-200 bg-gray-50/50">
+                <div className="w-12 h-12 rounded-full bg-emerald-100 text-[#166534] flex items-center justify-center mx-auto mb-3">
+                  <Camera size={20} />
+                </div>
+                <p className="text-sm font-bold text-gray-800">No poultry images uploaded yet</p>
+                <p className="text-xs text-gray-400 mt-1 max-w-sm mx-auto">
+                  Upload an image using the scanner above or configure an ESP32-CAM kit to view automated poultry flock captures.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {uploadedImages.map((img) => (
+                  <div
+                    key={img.image_id}
+                    className="group rounded-xl border border-gray-200 overflow-hidden bg-white hover:border-[#166534] hover:shadow-md transition-all flex flex-col justify-between"
+                  >
+                    <div className="relative aspect-video bg-gray-100 overflow-hidden cursor-pointer" onClick={() => setViewingImage(img)}>
+                      {img.signed_url ? (
+                        <img
+                          src={img.signed_url}
+                          alt={img.original_filename || "Poultry screening"}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-400 text-xs">
+                          Preview Unavailable
+                        </div>
+                      )}
+                      <span
+                        className={`absolute top-2 right-2 text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm uppercase ${
+                          img.predicted_class === "Healthy"
+                            ? "bg-emerald-600 text-white"
+                            : img.predicted_class
+                            ? "bg-red-600 text-white"
+                            : "bg-gray-700 text-white"
+                        }`}
+                      >
+                        {img.predicted_class || img.processing_status}
+                      </span>
+                    </div>
+
+                    <div className="p-3 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between text-gray-500 text-[11px]">
+                        <span>Source: {img.source === "ESP32-CAM" ? "📷 ESP32-CAM" : "📁 Upload"}</span>
+                        <span>{img.confidence ? `${img.confidence}% conf.` : "—"}</span>
+                      </div>
+                      <div className="text-[11px] text-gray-400 truncate">
+                        {img.original_filename}
+                      </div>
+                      <div className="pt-1 flex items-center justify-between border-t border-gray-100 text-[11px] text-gray-400">
+                        <span>{img.created_at ? new Date(img.created_at).toLocaleDateString() : "Recent"}</span>
+                        {img.signed_url && (
+                          <button
+                            type="button"
+                            onClick={() => setViewingImage(img)}
+                            className="text-[#166534] font-bold hover:underline"
+                          >
+                            View Full →
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Full-Resolution Image Modal */}
+          {viewingImage && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+              <div className="relative max-w-2xl w-full bg-white rounded-2xl overflow-hidden shadow-2xl border border-gray-200">
+                <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+                  <div>
+                    <h4 className="font-bold text-gray-900 text-sm">{viewingImage.original_filename || "Poultry Image"}</h4>
+                    <span className="text-[11px] text-gray-400">Class: {viewingImage.predicted_class || "Processing"} | Storage: {viewingImage.storage_path}</span>
+                  </div>
+                  <button
+                    onClick={() => setViewingImage(null)}
+                    className="p-1 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+                <div className="p-4 flex items-center justify-center bg-gray-900 max-h-[70vh]">
+                  {viewingImage.signed_url && (
+                    <img
+                      src={viewingImage.signed_url}
+                      alt="Full poultry scan"
+                      className="max-h-[65vh] w-auto rounded-lg object-contain"
+                    />
+                  )}
+                </div>
+                <div className="p-4 bg-gray-50 flex items-center justify-between text-xs text-gray-600">
+                  <span>Confidence: <strong>{viewingImage.confidence ? `${viewingImage.confidence}%` : "—"}</strong></span>
+                  <a
+                    href={viewingImage.signed_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 rounded-lg bg-[#166534] text-white font-bold text-xs hover:bg-[#14532d]"
+                  >
+                    Open Original in New Tab
+                  </a>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Disease Reference Categories */}
           <section className="bg-white rounded-2xl shadow-sm border border-gray-200/80 p-6 sm:p-8">

@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from flask import Blueprint, request
 from services.thingspeak_service import fetch_latest_telemetry
 from services.supabase_service import save_telemetry_record, get_latest_telemetry_from_db
+from services.sync_service import sync_and_outbox
+from services.storage_service import upload_poultry_image, create_signed_image_url, delete_poultry_image
 
 PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
 if PROJECT_ROOT not in sys.path:
@@ -84,6 +86,7 @@ def complete_profile():
         """,
         (data["farm_name"].strip(), farm_type, breed, data["address"].strip(), latitude, longitude, existing_profile["farmer_id"]),
     )
+    sync_and_outbox("Farmers", existing_profile["farmer_id"], "UPDATE")
     return createResult(None, {"profile_completed": True})
 
 
@@ -124,17 +127,38 @@ def dashboard():
     vet_consultations = executeQuery("""
         SELECT vc.consultation_id, vc.disease_name, vc.recommendation, vc.status,
                vc.consultation_date,
-               v.full_name AS vet_name, v.specialization AS vet_specialization,
+               v.vet_id, v.full_name AS vet_name, v.phone_number AS vet_phone_number,
+               v.email AS vet_email, v.specialization AS vet_specialization,
                v.hospital_clinic AS vet_clinic
         FROM Vet_Consultations vc
-        JOIN Veterinarians v ON v.vet_id = vc.vet_id
+        LEFT JOIN Veterinarians v ON v.vet_id = vc.vet_id
         WHERE vc.farmer_id=%s
         ORDER BY vc.consultation_date DESC
-        LIMIT 10""", (fid,))
+        LIMIT 20""", (fid,))
     return createResult(None, {"farm": farmer, "environment": latest[0] if latest else None,
         "mortality": mortality_analytics(fid), "alerts": alerts, "vaccinations": vaccines,
         "reminders": reminders, "predictions": predictions,
         "vet_consultations": vet_consultations})
+
+
+@farmer_bp.route("/consultations", methods=["GET"])
+@jwt_required()
+def farmer_consultations():
+    farmer, error = farmer_only()
+    if error: return error
+    fid = farmer["farmer_id"]
+    consultations = executeQuery("""
+        SELECT vc.consultation_id, vc.disease_name, vc.recommendation, vc.status,
+               vc.consultation_date,
+               v.vet_id, v.full_name AS vet_name, v.phone_number AS vet_phone_number,
+               v.email AS vet_email, v.specialization AS vet_specialization,
+               v.hospital_clinic AS vet_clinic
+        FROM Vet_Consultations vc
+        LEFT JOIN Veterinarians v ON v.vet_id = vc.vet_id
+        WHERE vc.farmer_id=%s
+        ORDER BY vc.consultation_date DESC
+        LIMIT 50""", (fid,))
+    return createResult(None, consultations)
 
 
 @farmer_bp.route("/profile", methods=["GET", "PUT"])
@@ -162,6 +186,7 @@ def profile():
             if not low <= changes[coordinate] <= high: return createResult(f"{coordinate} is outside valid range", None)
     set_clause = ", ".join(f"{key}=%s" for key in changes)
     executeQuery(f"UPDATE Farmers SET {set_clause} WHERE farmer_id=%s", tuple(changes.values()) + (farmer["farmer_id"],))
+    sync_and_outbox("Farmers", farmer["farmer_id"], "UPDATE")
     return createResult(None, {"updated": True})
 
 
@@ -198,8 +223,10 @@ def mortality():
     symptoms = data.get("observed_symptoms", [])
     if not isinstance(symptoms, list): return createResult("observed_symptoms must be a list", None)
     recorded_at = data.get("recorded_at") or datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    executeQuery("""INSERT INTO Mortality_Records (farmer_id, flock_id, death_count, observed_symptoms, custom_symptoms, suspected_cause, recorded_at, created_by)
+    m_res = executeQuery("""INSERT INTO Mortality_Records (farmer_id, flock_id, death_count, observed_symptoms, custom_symptoms, suspected_cause, recorded_at, created_by)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""", (fid, data.get("flock_id"), deaths, json_value(symptoms), data.get("custom_symptoms"), data.get("suspected_cause"), recorded_at, fid))
+    if isinstance(m_res, dict) and m_res.get("lastrowid"):
+        sync_and_outbox("Mortality_Records", m_res["lastrowid"], "INSERT")
     if deaths > 0: create_alert(fid, "MORTALITY", "HIGH", "Mortality recorded", f"Farmer recorded {deaths} bird deaths. This is an observation, not a diagnosis.", "mortality-record", 60)
     return createResult(None, {"recorded": True})
 
@@ -228,8 +255,10 @@ def reminders():
     if data.get("recurrence", "None") not in recurrences: return createResult("invalid recurrence", None)
     try: scheduled = datetime.fromisoformat(str(data["scheduled_at"]).replace("Z", "+00:00"))
     except (KeyError, TypeError, ValueError): return createResult("scheduled_at must be a valid ISO date/time", None)
-    executeQuery("""INSERT INTO Farmer_Reminders (farmer_id, task_name, activity_category, scheduled_at, recurrence, instructions)
+    r_res = executeQuery("""INSERT INTO Farmer_Reminders (farmer_id, task_name, activity_category, scheduled_at, recurrence, instructions)
         VALUES (%s,%s,%s,%s,%s,%s)""", (fid, data["task_name"].strip(), data["activity_category"], scheduled, data.get("recurrence", "None"), data.get("instructions")))
+    if isinstance(r_res, dict) and r_res.get("lastrowid"):
+        sync_and_outbox("Farmer_Reminders", r_res["lastrowid"], "INSERT")
     return createResult(None, {"created": True})
 
 
@@ -241,10 +270,12 @@ def update_reminder(reminder_id):
     fid = farmer["farmer_id"]
     if request.method == "DELETE":
         executeQuery("DELETE FROM Farmer_Reminders WHERE reminder_id=%s AND farmer_id=%s", (reminder_id, fid))
+        sync_and_outbox("Farmer_Reminders", reminder_id, "DELETE")
         return createResult(None, {"deleted": True})
     data = request.get_json(silent=True) or {}
     if data.get("status") == "Completed":
         executeQuery("UPDATE Farmer_Reminders SET status='Completed', completed_at=NOW() WHERE reminder_id=%s AND farmer_id=%s", (reminder_id, fid))
+        sync_and_outbox("Farmer_Reminders", reminder_id, "UPDATE")
         return createResult(None, {"updated": True})
     return createResult("only completion is currently editable; delete and recreate to change scheduling", None)
 
@@ -265,8 +296,10 @@ def vaccinations():
         return createResult("vaccine_name and scheduled_date are required", None)
     try: datetime.strptime(data["scheduled_date"], "%Y-%m-%d")
     except ValueError: return createResult("scheduled_date must be YYYY-MM-DD", None)
-    executeQuery("""INSERT INTO Vaccinations (farmer_id, flock_id, vaccine_name, target_disease, scheduled_date, dose_information, notes)
+    v_res = executeQuery("""INSERT INTO Vaccinations (farmer_id, flock_id, vaccine_name, target_disease, scheduled_date, dose_information, notes)
         VALUES (%s,%s,%s,%s,%s,%s,%s)""", (fid, data.get("flock_id"), data["vaccine_name"].strip(), data.get("target_disease"), data["scheduled_date"], data.get("dose_information"), data.get("notes")))
+    if isinstance(v_res, dict) and v_res.get("lastrowid"):
+        sync_and_outbox("Vaccinations", v_res["lastrowid"], "INSERT")
     return createResult(None, {"created": True})
 
 
@@ -279,6 +312,7 @@ def update_vaccination(vaccination_id):
     if status not in {"Scheduled", "Completed", "Missed"}: return createResult("invalid vaccination status", None)
     result = executeQuery("""UPDATE Vaccinations SET status=%s, completed_date=CASE WHEN %s='Completed' THEN CURDATE() ELSE completed_date END
         WHERE vaccination_id=%s AND farmer_id=%s""", (status, status, vaccination_id, farmer["farmer_id"]))
+    sync_and_outbox("Vaccinations", vaccination_id, "UPDATE")
     return createResult(None, {"updated": bool(result["affectedRows"])})
 
 
@@ -301,6 +335,7 @@ def update_alert(alert_id):
     status = (request.get_json(silent=True) or {}).get("status")
     if status not in {"Unread", "Read", "Acknowledged", "Resolved"}: return createResult("invalid alert status", None)
     executeQuery("UPDATE Farmer_Alerts SET status=%s WHERE alert_id=%s AND farmer_id=%s", (status, alert_id, farmer["farmer_id"]))
+    sync_and_outbox("Farmer_Alerts", alert_id, "UPDATE")
     return createResult(None, {"updated": True})
 
 
@@ -318,7 +353,9 @@ def support_requests():
         return createResult("a valid category and description are required", None)
     priority = (data.get("priority") or "Medium").title()
     if priority not in {"Low", "Medium", "High", "Critical"}: return createResult("invalid priority", None)
-    executeQuery("INSERT INTO Support_Requests (farmer_id, category, description, priority) VALUES (%s,%s,%s,%s)", (fid, data["category"], data["description"].strip(), priority))
+    s_res = executeQuery("INSERT INTO Support_Requests (farmer_id, category, description, priority) VALUES (%s,%s,%s,%s)", (fid, data["category"], data["description"].strip(), priority))
+    if isinstance(s_res, dict) and s_res.get("lastrowid"):
+        sync_and_outbox("Support_Requests", s_res["lastrowid"], "INSERT")
     return createResult(None, {"created": True})
 
 
@@ -335,7 +372,9 @@ def veterinarian_requests():
     latest_environment = executeQuery("SELECT temperature, humidity, ammonia, timestamp FROM environment_readings WHERE farm_id=%s ORDER BY timestamp DESC LIMIT 1", (fid,))
     snapshot = {"risk_level": data.get("risk_level"), "environment": latest_environment[0] if latest_environment else None,
                 "mortality": mortality_analytics(fid), "prediction": data.get("prediction")}
-    executeQuery("INSERT INTO Veterinarian_Requests (farmer_id, disease_alert, message, snapshot) VALUES (%s,%s,%s,%s)", (fid, data.get("disease_alert"), data.get("message"), json_value(snapshot)))
+    vr_res = executeQuery("INSERT INTO Veterinarian_Requests (farmer_id, disease_alert, message, snapshot) VALUES (%s,%s,%s,%s)", (fid, data.get("disease_alert"), data.get("message"), json_value(snapshot)))
+    if isinstance(vr_res, dict) and vr_res.get("lastrowid"):
+        sync_and_outbox("Veterinarian_Requests", vr_res["lastrowid"], "INSERT")
     return createResult(None, {"created": True, "message": "Request shared for veterinary review; no diagnosis was made."})
 
 
@@ -346,42 +385,171 @@ def disease_predictions():
     return error or createResult(None, executeQuery("SELECT * FROM Disease_Prediction_Details WHERE farmer_id=%s ORDER BY screened_at DESC LIMIT 100", (farmer["farmer_id"],)))
 
 
+@farmer_bp.route("/poultry-images", methods=["POST"])
+@jwt_required()
+def upload_poultry_image_endpoint():
+    """
+    Primary endpoint for manual and ESP32-CAM poultry image uploads.
+    Validates, uploads to private Supabase Storage bucket 'poultry-images',
+    persists metadata, runs CNN inference, and returns signed URL.
+    """
+    farmer, error = farmer_only()
+    if error:
+        return error
+
+    image = request.files.get("image")
+    if image is None or not image.filename:
+        return createResult("image file is required", None)
+
+    fid = farmer["farmer_id"]
+    source = request.form.get("source", "Manual_Upload")
+    device_id = request.form.get("device_id")
+
+    # 1. Upload to Supabase Storage
+    up_ok, up_res = upload_poultry_image(image.stream, fid, image.filename)
+    if not up_ok:
+        return createResult(f"Image storage upload failed: {up_res}", None)
+
+    storage_path = up_res["storage_path"]
+    image_bytes = up_res["image_bytes"]
+    file_size = up_res["file_size"]
+    mime_type = up_res["mime_type"]
+
+    # 2. Record initial metadata in poultry_images table
+    insert_img_query = """
+        INSERT INTO poultry_images
+        (farmer_id, device_id, storage_bucket, storage_path, original_filename, file_size_bytes, mime_type, source, processing_status)
+        VALUES (%s, %s, 'poultry-images', %s, %s, %s, %s, %s, 'processing')
+    """
+    img_db = executeQuery(insert_img_query, (fid, device_id, storage_path, image.filename, file_size, mime_type, source))
+    image_id = img_db.get("lastrowid") if isinstance(img_db, dict) else None
+
+    # 3. Run verified 3-class ResNet-18 CNN model
+    prediction_result = None
+    pred_id = None
+    predicted_class = None
+    confidence = None
+
+    try:
+        from Poultry_Guard_ML.cnn.inference.image_predictor import predict_image
+        prediction_result = predict_image(image_bytes)
+        predicted_class = prediction_result["predicted_class"]
+        confidence = float(prediction_result["confidence"])
+        risk = "Low" if predicted_class == "Healthy" else ("High" if confidence >= .75 else "Medium")
+
+        # Save to Disease_Predictions and Disease_Prediction_Details for compatibility
+        pred_res = executeQuery(
+            """INSERT INTO Disease_Predictions (farmer_id, disease_name, risk_level, confidence_score, model_used)
+               VALUES (%s,%s,%s,%s,%s)""",
+            (fid, predicted_class, risk, round(confidence * 100, 2), prediction_result["model"])
+        )
+        pred_id = pred_res.get("lastrowid") if isinstance(pred_res, dict) else None
+
+        if pred_id:
+            executeQuery(
+                """INSERT INTO Disease_Prediction_Details (prediction_id, farmer_id, predicted_class, confidence, probabilities, image_name)
+                   VALUES (%s,%s,%s,%s,%s,%s)""",
+                (pred_id, fid, predicted_class, confidence, json_value(prediction_result.get("probabilities")), image.filename)
+            )
+
+        # Update poultry_images status to completed
+        if image_id:
+            executeQuery(
+                """UPDATE poultry_images
+                   SET processing_status = 'completed', prediction_id = %s, predicted_class = %s, confidence = %s
+                   WHERE image_id = %s""",
+                (pred_id, predicted_class, round(confidence * 100, 2), image_id)
+            )
+
+        if predicted_class != "Healthy":
+            severity = "HIGH" if confidence >= .75 else "MEDIUM"
+            create_alert(fid, "DISEASE RISK", severity, "AI-based screening requires attention",
+                         f"Potential {predicted_class} indication ({confidence * 100:.1f}% confidence). This is not a veterinary diagnosis; consult a veterinarian.",
+                         f"screening:{predicted_class}", 120)
+
+    except Exception as exc:
+        if image_id:
+            executeQuery("UPDATE poultry_images SET processing_status = 'failed', error_message = %s WHERE image_id = %s", (str(exc)[:250], image_id))
+        prediction_result = {"error": f"Inference processing failed: {str(exc)}"}
+
+    # 4. Generate temporary signed URL for authorized frontend display
+    sign_ok, signed_url = create_signed_image_url(storage_path, expires_in=3600)
+
+    response_payload = {
+        "image_id": image_id,
+        "storage_path": storage_path,
+        "signed_url": signed_url if sign_ok else None,
+        "processing_status": "completed" if (prediction_result and "error" not in prediction_result) else "failed",
+        "predicted_disease": predicted_class,
+        "predicted_class": predicted_class,
+        "confidence": confidence,
+        "probabilities": prediction_result.get("probabilities") if prediction_result else None,
+        "model": prediction_result.get("model") if prediction_result else None,
+        "risk_level": "Low" if predicted_class == "Healthy" else ("High" if (confidence and confidence >= .75) else "Medium"),
+        "disclaimer": "AI-based screening only; not a confirmed veterinary diagnosis."
+    }
+
+    return createResult(None, response_payload)
+
+
+@farmer_bp.route("/poultry-images", methods=["GET"])
+@jwt_required()
+def get_farmer_poultry_images():
+    """Returns uploaded images for the authenticated farmer with authorized signed URLs."""
+    farmer, error = farmer_only()
+    if error:
+        return error
+
+    fid = farmer["farmer_id"]
+    rows = executeQuery(
+        """SELECT image_id, farmer_id, device_id, storage_bucket, storage_path, original_filename,
+                  file_size_bytes, mime_type, source, processing_status, prediction_id,
+                  predicted_class, confidence, error_message, captured_at, created_at
+           FROM poultry_images
+           WHERE farmer_id = %s
+           ORDER BY created_at DESC LIMIT 50""",
+        (fid,)
+    )
+
+    results = []
+    for r in (rows or []):
+        img_dict = dict(r)
+        sp = r.get("storage_path")
+        if sp:
+            s_ok, s_url = create_signed_image_url(sp, expires_in=3600)
+            img_dict["signed_url"] = s_url if s_ok else None
+        else:
+            img_dict["signed_url"] = None
+        results.append(img_dict)
+
+    return createResult(None, results)
+
+
+@farmer_bp.route("/poultry-images/<int:image_id>/signed-url", methods=["GET"])
+@jwt_required()
+def get_image_signed_url(image_id):
+    """Generates a fresh temporary signed URL for an image if authorized."""
+    farmer, error = farmer_only()
+    if error:
+        return error
+
+    fid = farmer["farmer_id"]
+    rows = executeQuery("SELECT storage_path FROM poultry_images WHERE image_id = %s AND farmer_id = %s", (image_id, fid))
+    if not rows:
+        return createResult("Image not found or access unauthorized", None)
+
+    ok, signed_url = create_signed_image_url(rows[0]["storage_path"], expires_in=3600)
+    if not ok:
+        return createResult(f"Could not generate signed URL: {signed_url}", None)
+
+    return createResult(None, {"signed_url": signed_url})
+
+
 @farmer_bp.route("/disease-prediction", methods=["POST"])
 @jwt_required()
 def disease_prediction():
-    """Run inference only. The model is cached by the inference module and never trained here."""
-    farmer, error = farmer_only()
-    if error: return error
-    image = request.files.get("image")
-    if image is None or not image.filename: return createResult("image is required", None)
-    try:
-        from Poultry_Guard_ML.cnn.inference.image_predictor import predict_image
-        result = predict_image(image.stream)
-    except (ValueError, RuntimeError, FileNotFoundError) as exc:
-        return createResult(str(exc), None)
-    fid = farmer["farmer_id"]
-    # predict_image returns 'predicted_class' (not 'predicted_disease')
-    predicted = result["predicted_class"]
-    confidence = float(result["confidence"])
-    risk = "Low" if predicted == "Healthy" else ("High" if confidence >= .75 else "Medium")
-    try:
-        executeQuery("""INSERT INTO Disease_Predictions (farmer_id, disease_name, risk_level, confidence_score, model_used)
-            VALUES (%s,%s,%s,%s,%s)""", (fid, predicted, risk, round(confidence * 100, 2), result["model"]))
-        prediction = executeQuery("SELECT LAST_INSERT_ID() prediction_id", ())[0]
-        pred_id = prediction["prediction_id"]
-        if pred_id:
-            executeQuery("""INSERT INTO Disease_Prediction_Details (prediction_id, farmer_id, predicted_class, confidence, probabilities, image_name)
-                VALUES (%s,%s,%s,%s,%s,%s)""", (pred_id, fid, predicted, confidence, json_value(result.get("probabilities")), image.filename))
-    except Exception as db_err:
-        # DB logging failure must not block the AI result from reaching the frontend
-        import logging
-        logging.warning(f"Disease prediction DB logging failed: {db_err}")
-    if predicted != "Healthy":
-        severity = "HIGH" if confidence >= .75 else "MEDIUM"
-        create_alert(fid, "DISEASE RISK", severity, "AI-based screening requires attention",
-                     f"Potential {predicted} indication ({confidence * 100:.1f}% confidence). This is not a veterinary diagnosis; consult a veterinarian.",
-                     f"screening:{predicted}", 120)
-    return createResult(None, {**result, "risk_level": risk, "disclaimer": "AI-based screening only; not a confirmed veterinary diagnosis."})
+    """Compatible wrapper that calls the unified storage + inference pipeline."""
+    return upload_poultry_image_endpoint()
 
 
 
@@ -473,12 +641,14 @@ def request_hardware_kit():
     if priority not in {"Low", "Medium", "High", "Critical"}:
         return createResult("priority must be Low, Medium, High, or Critical", None)
 
-    executeQuery(
+    req_res = executeQuery(
         """INSERT INTO Hardware_Assignment_Requests
            (farmer_id, farm_name_snapshot, location_snapshot, reason, priority)
            VALUES (%s, %s, %s, %s, %s)""",
         (farmer["farmer_id"], farmer["farm_name"], farmer["address"], reason, priority),
     )
+    if isinstance(req_res, dict) and req_res.get("lastrowid"):
+        sync_and_outbox("Hardware_Assignment_Requests", req_res["lastrowid"], "INSERT")
     return createResult(None, {"status": "Pending"})
 
 

@@ -6,7 +6,7 @@ from pathlib import Path
 CNN_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CNN_DIR.parent.parent
 MODEL_DIR = CNN_DIR / "model"
-MODEL_PATH = MODEL_DIR / "best_resnet18_poultry_3class.pth"
+MODEL_PATH = MODEL_DIR / "best_resnet18_poultry_3class_v2.pth"
 CLASS_MAPPING_PATH = MODEL_DIR / "class_mapping.json"
 DATASET_MANIFEST_PATH = MODEL_DIR / "dataset_manifest.json"
 DEFAULT_DATASETS_DIR = PROJECT_ROOT / "datasets"

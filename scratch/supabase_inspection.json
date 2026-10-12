@@ -1,0 +1,136 @@
+{
+  "auth_users": [
+    {
+      "id": "0a728a10-72b3-48bb-8725-7e6426bac85c",
+      "aud": "authenticated",
+      "role": "authenticated",
+      "email": "admin@poultryguard.com",
+      "email_confirmed_at": "2026-10-02T15:17:54.713893Z",
+      "phone": "",
+      "confirmed_at": "2026-10-02T15:17:54.713893Z",
+      "last_sign_in_at": "2026-10-02T15:18:17.962599Z",
+      "app_metadata": {
+        "provider": "email",
+        "providers": [
+          "email"
+        ]
+      },
+      "user_metadata": {
+        "email_verified": true
+      },
+      "identities": null,
+      "created_at": "2026-10-02T15:17:54.697296Z",
+      "updated_at": "2026-10-02T15:18:17.981934Z",
+      "is_anonymous": false
+    },
+    {
+      "id": "0e48f5ce-9727-49d1-b181-5f43a96e96c1",
+      "aud": "authenticated",
+      "role": "authenticated",
+      "email": "shindeapurva84@gmail.com",
+      "email_confirmed_at": "2026-10-02T14:46:15.848473Z",
+      "phone": "",
+      "confirmation_sent_at": "2026-10-02T14:45:32.975477Z",
+      "confirmed_at": "2026-10-02T14:46:15.848473Z",
+      "last_sign_in_at": "2026-10-02T14:46:26.610619Z",
+      "app_metadata": {
+        "provider": "email",
+        "providers": [
+          "email"
+        ]
+      },
+      "user_metadata": {
+        "email": "shindeapurva84@gmail.com",
+        "email_verified": true,
+        "full_name": "Apurva Shinde",
+        "phone_verified": false,
+        "role": "Farmer",
+        "sub": "0e48f5ce-9727-49d1-b181-5f43a96e96c1"
+      },
+      "identities": null,
+      "created_at": "2026-10-02T14:45:32.946354Z",
+      "updated_at": "2026-10-02T14:46:26.613442Z",
+      "is_anonymous": false
+    },
+    {
+      "id": "e76b33b8-c59f-4955-b961-38409d34b455",
+      "aud": "authenticated",
+      "role": "authenticated",
+      "email": "prathmesh@123gmail.com",
+      "phone": "",
+      "confirmation_sent_at": "2026-10-02T14:43:28.697906Z",
+      "app_metadata": {
+        "provider": "email",
+        "providers": [
+          "email"
+        ]
+      },
+      "user_metadata": {
+        "email": "prathmesh@123gmail.com",
+        "email_verified": false,
+        "phone_verified": false,
+        "sub": "e76b33b8-c59f-4955-b961-38409d34b455"
+      },
+      "identities": null,
+      "created_at": "2026-10-02T14:43:28.656318Z",
+      "updated_at": "2026-10-02T14:43:31.490576Z",
+      "is_anonymous": false
+    },
+    {
+      "id": "11f5d96a-7b23-4048-8b55-067d9ec8d830",
+      "aud": "authenticated",
+      "role": "authenticated",
+      "email": "farmer@poultryguard.com",
+      "phone": "",
+      "confirmation_sent_at": "2026-09-30T08:07:21.084509Z",
+      "app_metadata": {
+        "provider": "email",
+        "providers": [
+          "email"
+        ]
+      },
+      "user_metadata": {
+        "email": "farmer@poultryguard.com",
+        "email_verified": false,
+        "phone_verified": false,
+        "sub": "11f5d96a-7b23-4048-8b55-067d9ec8d830"
+      },
+      "identities": null,
+      "created_at": "2026-09-30T08:07:21.043381Z",
+      "updated_at": "2026-09-30T08:07:24.054159Z",
+      "is_anonymous": false
+    }
+  ],
+  "counts": {
+    "farmers": 0,
+    "veterinarians": 0,
+    "admins": 0,
+    "vendors": 0,
+    "devices": 0,
+    "hardware_kits": 0,
+    "sensor_data": 0,
+    "disease_predictions": 0,
+    "disease_prediction_details": 0,
+    "vet_consultations": 0,
+    "alerts": 0,
+    "farmer_alerts": 0,
+    "outbreak_alerts": 0,
+    "chatbot_history": 0,
+    "transport_requests": 0,
+    "vendor_trips": 0,
+    "device_assignments": 0,
+    "device_heartbeats": 0,
+    "hardware_assignment_requests": 0,
+    "support_tickets": 0,
+    "support_requests": 0,
+    "veterinarian_requests": 0,
+    "environment_readings": 0,
+    "environment_alerts": 0,
+    "farm_environment_thresholds": 0,
+    "mortality_records": 0,
+    "vaccinations": 0,
+    "farmer_reminders": 0,
+    "telemetry": 0
+  },
+  "admins": []
+}

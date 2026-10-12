@@ -1,25 +1,52 @@
+import os
 import mysql.connector
-from utlis.response import createResult
+from contextlib import contextmanager
 
 def getConnection():
     return mysql.connector.connect(
-        host = "localhost",
-        port = 3306,
-        user ="root",
-        password ="Apurva@3522",
-        database="poultryguard_ai",
-        use_pure = True
+        host=os.getenv("MYSQL_HOST", "localhost"),
+        port=int(os.getenv("MYSQL_PORT", "3306")),
+        user=os.getenv("MYSQL_USER", "root"),
+        password=os.getenv("MYSQL_PASSWORD", "Apurva@3522"),
+        database=os.getenv("MYSQL_DATABASE", "poultryguard_ai"),
+        use_pure=True
     )
 
-def executeQuery(query, params):
-    with getConnection() as con: # with statement will automatically close the connection
-        with con.cursor(dictionary =True) as cur:
-            cur.execute(query,params)
-            if cur.description: # to identify select query because only select query has coloumns 
+def executeQuery(query, params=None):
+    """
+    Executes a query on MySQL.
+    - If SELECT query: returns list of row dicts.
+    - If data-modifying query (INSERT/UPDATE/DELETE): commits and returns dict with
+      both 'affectedRows' and 'lastrowid'.
+    """
+    with getConnection() as con:
+        with con.cursor(dictionary=True) as cur:
+            cur.execute(query, params)
+            if cur.description:
                 return cur.fetchall()
             else:
                 con.commit()
-                return {"affectedRows": cur.rowcount}
+                return {
+                    "affectedRows": cur.rowcount,
+                    "lastrowid": cur.lastrowid
+                }
 
-    
-
+@contextmanager
+def get_transaction_cursor():
+    """
+    Context manager for atomic multi-statement MySQL transactions.
+    Rolls back automatically on exception, commits on successful block exit.
+    Yields (cursor, connection).
+    """
+    con = getConnection()
+    con.autocommit = False
+    cur = con.cursor(dictionary=True)
+    try:
+        yield cur, con
+        con.commit()
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        cur.close()
+        con.close()

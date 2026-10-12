@@ -2,6 +2,7 @@ from flask import Blueprint, request
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 from utlis.response import createResult
 from utlis.db_utlis import executeQuery
+from services.sync_service import sync_and_outbox
 from datetime import datetime
 import json
 
@@ -113,6 +114,7 @@ def complete_profile():
            WHERE vet_id=%s""",
         (data["specialization"].strip(), data["license_number"].strip(), experience, data["hospital_clinic"].strip(), vet[0]["vet_id"]),
     )
+    sync_and_outbox("Veterinarians", vet[0]["vet_id"], "UPDATE")
     return createResult(None, {"profile_completed": True})
 
 
@@ -156,11 +158,13 @@ def cases_handler():
     if not farmer_id:
         return createResult("farmer_id is required", None)
 
-    executeQuery(
+    c_res = executeQuery(
         """INSERT INTO Vet_Consultations (farmer_id, vet_id, disease_name, recommendation, status)
            VALUES (%s, %s, %s, %s, 'Pending')""",
         (farmer_id, vid, disease_name, recommendation)
     )
+    if isinstance(c_res, dict) and c_res.get("lastrowid"):
+        sync_and_outbox("Vet_Consultations", c_res["lastrowid"], "INSERT")
     return createResult(None, {"created": True})
 
 
@@ -240,6 +244,7 @@ def single_case_handler(case_id):
         f"UPDATE Vet_Consultations SET {', '.join(updates)} WHERE consultation_id=%s",
         tuple(params)
     )
+    sync_and_outbox("Vet_Consultations", case_id, "UPDATE")
     return createResult(None, {"updated": True})
 
 
@@ -313,6 +318,7 @@ def update_alert_handler(alert_id):
         "UPDATE Farmer_Alerts SET status=%s WHERE alert_id=%s",
         (status, alert_id)
     )
+    sync_and_outbox("Farmer_Alerts", alert_id, "UPDATE")
     return createResult(None, {"updated": True})
 
 
@@ -466,11 +472,13 @@ def consultations_handler():
     if not farmer_id:
         return createResult("farmer_id is required", None)
 
-    executeQuery(
+    c_res = executeQuery(
         """INSERT INTO Vet_Consultations (farmer_id, vet_id, disease_name, recommendation, status)
            VALUES (%s, %s, %s, %s, 'Pending')""",
         (farmer_id, vid, subject, recommendation)
     )
+    if isinstance(c_res, dict) and c_res.get("lastrowid"):
+        sync_and_outbox("Vet_Consultations", c_res["lastrowid"], "INSERT")
     return createResult(None, {"created": True})
 
 
@@ -507,6 +515,7 @@ def update_consultation_handler(consultation_id):
         f"UPDATE Vet_Consultations SET {', '.join(updates)} WHERE consultation_id=%s",
         tuple(params)
     )
+    sync_and_outbox("Vet_Consultations", consultation_id, "UPDATE")
     return createResult(None, {"updated": True})
 
 

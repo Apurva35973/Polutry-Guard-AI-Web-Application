@@ -3,45 +3,28 @@ import json
 import urllib.request
 import urllib.error
 from datetime import datetime
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Ensure root .env is loaded
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+
 from utlis.db_utlis import executeQuery
-
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY", os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")).strip()
-
-def is_supabase_configured():
-    """Checks if valid Supabase configuration is present in environment variables."""
-    return bool(SUPABASE_URL and SUPABASE_KEY)
+from services.sync_service import (
+    sync_and_outbox,
+    execute_supabase_rest,
+    is_supabase_configured,
+    SUPABASE_URL,
+    SUPABASE_KEY
+)
 
 def send_to_supabase_rest(table_name, payload):
     """
     Sends data to Supabase PostgreSQL REST API.
     Returns (True, response_data) on success, or (False, error_msg) on failure.
+    Preserved for backward-compatibility.
     """
-    if not is_supabase_configured():
-        return False, "Supabase credentials not configured."
-
-    url = f"{SUPABASE_URL}/rest/v1/{table_name}"
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "return=representation"
-    }
-
-    try:
-        data_bytes = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=data_bytes, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            status_code = resp.getcode()
-            res_body = resp.read().decode("utf-8")
-            if status_code in (200, 201):
-                return True, json.loads(res_body) if res_body else {}
-            return False, f"Supabase responded with status {status_code}: {res_body}"
-    except urllib.error.HTTPError as e:
-        err_body = e.read().decode("utf-8") if e.fp else str(e)
-        return False, f"Supabase HTTP error {e.code}: {err_body}"
-    except Exception as e:
-        return False, f"Failed to push to Supabase: {str(e)}"
+    return execute_supabase_rest("POST", table_name, payload=payload)
 
 def save_telemetry_record(
     hardware_kit_id,
@@ -56,7 +39,7 @@ def save_telemetry_record(
 ):
     """
     Persists telemetry record with deduplication based on (hardware_kit_id, thingspeak_entry_id).
-    Persists in MySQL (and attempts Supabase PostgreSQL if configured).
+    Persists in MySQL (and attempts Supabase PostgreSQL with outbox resilience if configured).
     Updates Hardware_Kits last_telemetry_at and last_seen_at.
     """
     if not hardware_kit_id:
@@ -68,32 +51,39 @@ def save_telemetry_record(
             "SELECT telemetry_id FROM telemetry WHERE hardware_kit_id = %s AND thingspeak_entry_id = %s LIMIT 1",
             (hardware_kit_id, thingspeak_entry_id)
         )
-        if existing:
+        if existing and len(existing) > 0:
             return {
                 "success": True,
                 "inserted": False,
                 "is_duplicate": True,
                 "telemetry_id": existing[0]["telemetry_id"],
-                "message": f"Telemetry entry {thingspeak_entry_id} already saved."
+                "message": "Telemetry entry already exists for this hardware kit and entry ID."
             }
 
-    # Format recorded_at
-    if recorded_at:
-        try:
-            if isinstance(recorded_at, str):
-                # Clean ISO string to MySQL DATETIME format YYYY-MM-DD HH:MM:SS
-                dt = datetime.fromisoformat(recorded_at.replace('Z', '+00:00'))
-                formatted_recorded_at = dt.strftime('%Y-%m-%d %H:%M:%S')
-            elif isinstance(recorded_at, datetime):
-                formatted_recorded_at = recorded_at.strftime('%Y-%m-%d %H:%M:%S')
-            else:
-                formatted_recorded_at = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-        except Exception:
-            formatted_recorded_at = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    # Format timestamp
+    if recorded_at is None:
+        formatted_recorded_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    elif isinstance(recorded_at, datetime):
+        formatted_recorded_at = recorded_at.strftime("%Y-%m-%d %H:%M:%S")
     else:
-        formatted_recorded_at = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        # String timestamp parsing fallback
+        try:
+            cleaned = str(recorded_at).replace("Z", "+00:00")
+            dt = datetime.fromisoformat(cleaned)
+            formatted_recorded_at = dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            formatted_recorded_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
-    raw_json = json.dumps(raw_payload) if raw_payload else None
+    # Serialize raw_payload
+    payload_str = None
+    if raw_payload is not None:
+        if isinstance(raw_payload, str):
+            payload_str = raw_payload
+        else:
+            try:
+                payload_str = json.dumps(raw_payload)
+            except Exception:
+                payload_str = None
 
     # Insert into MySQL
     insert_query = """
@@ -109,20 +99,31 @@ def save_telemetry_record(
             recorded_at
         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
-    insert_res = executeQuery(
-        insert_query,
-        (
-            hardware_kit_id,
-            farmer_id,
-            thingspeak_entry_id,
-            temperature,
-            humidity,
-            ammonia,
-            vocalization_activity,
-            raw_json,
-            formatted_recorded_at
-        )
+    insert_params = (
+        hardware_kit_id,
+        farmer_id,
+        thingspeak_entry_id,
+        temperature,
+        humidity,
+        ammonia,
+        vocalization_activity,
+        payload_str,
+        formatted_recorded_at
     )
+
+    try:
+        mysql_res = executeQuery(insert_query, insert_params)
+        telemetry_id = mysql_res.get("lastrowid") if isinstance(mysql_res, dict) else None
+    except Exception as e:
+        # Handle duplicate key race condition gracefully
+        if "Duplicate entry" in str(e) or "1062" in str(e):
+            return {
+                "success": True,
+                "inserted": False,
+                "is_duplicate": True,
+                "message": "Telemetry entry already exists (duplicate key constraint)."
+            }
+        return {"success": False, "error": f"Failed to persist in MySQL: {str(e)}"}
 
     # Update Hardware_Kits timestamp
     try:
@@ -133,11 +134,12 @@ def save_telemetry_record(
     except Exception as e:
         print(f"[WARN] Failed to update Hardware_Kits last_telemetry_at: {e}")
 
-    # Push to Supabase if configured
+    # Push to Supabase with outbox queuing if configured
     supabase_synced = False
     supabase_error = None
     if is_supabase_configured():
         sp_payload = {
+            "telemetry_id": telemetry_id,
             "hardware_kit_id": hardware_kit_id,
             "farmer_id": farmer_id,
             "thingspeak_entry_id": thingspeak_entry_id,
@@ -148,10 +150,9 @@ def save_telemetry_record(
             "raw_payload": raw_payload,
             "recorded_at": formatted_recorded_at
         }
-        ok, res_or_err = send_to_supabase_rest("telemetry", sp_payload)
-        supabase_synced = ok
-        if not ok:
-            supabase_error = res_or_err
+        sync_result = sync_and_outbox("telemetry", telemetry_id or f"{hardware_kit_id}_{thingspeak_entry_id}", "INSERT", sp_payload)
+        supabase_synced = sync_result.get("synced", False)
+        supabase_error = sync_result.get("error")
 
     return {
         "success": True,
@@ -176,7 +177,6 @@ def get_latest_telemetry_from_db(hardware_kit_id):
     rows = executeQuery(query, (hardware_kit_id,))
     if rows and len(rows) > 0:
         row = rows[0]
-        # Convert numeric types cleanly
         return {
             "telemetry_id": row["telemetry_id"],
             "hardware_kit_id": row["hardware_kit_id"],

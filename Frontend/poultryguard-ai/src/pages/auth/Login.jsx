@@ -2,13 +2,14 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import { AlertCircle } from "lucide-react";
-import { loginUser } from "../../services/authService";
+import { loginUser, supabaseResetPassword } from "../../services/authService";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("Vendor");
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
   const navigate = useNavigate();
@@ -16,6 +17,25 @@ export default function Login() {
   const handleRoleChange = (newRole) => {
     setRole(newRole);
     setErrorMessage("");
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email.trim()) {
+      return toast.warning("Please enter your email address first to reset password.");
+    }
+    setResetLoading(true);
+    try {
+      const { error } = await supabaseResetPassword(email.trim());
+      if (error) {
+        toast.error(error.message || "Failed to send password reset email.");
+      } else {
+        toast.success("Password reset email sent via Supabase! Check your inbox.");
+      }
+    } catch (err) {
+      toast.error("Unable to send reset email. Please try again later.");
+    } finally {
+      setResetLoading(false);
+    }
   };
 
   const handleLogin = async (e) => {
@@ -33,11 +53,17 @@ export default function Login() {
 
       if (result.status === "success") {
         localStorage.setItem("token", result.data.token);
+        if (result.data.supabase_token) {
+          localStorage.setItem("supabase_token", result.data.supabase_token);
+        }
         localStorage.setItem("role", result.data.role);
         localStorage.setItem("email", email);
         localStorage.setItem("user", JSON.stringify(result.data));
 
         sessionStorage.setItem("token", result.data.token);
+        if (result.data.supabase_token) {
+          sessionStorage.setItem("supabase_token", result.data.supabase_token);
+        }
         sessionStorage.setItem("role", result.data.role);
         sessionStorage.setItem("user", JSON.stringify(result.data));
         sessionStorage.setItem("email", email);
@@ -135,7 +161,17 @@ export default function Login() {
             </div>
 
             <div className="auth-field">
-              <label htmlFor="login-password">Password</label>
+              <div className="flex justify-between items-center mb-1">
+                <label htmlFor="login-password">Password</label>
+                <button
+                  type="button"
+                  onClick={handleForgotPassword}
+                  disabled={resetLoading}
+                  className="text-xs text-emerald-600 hover:text-emerald-700 font-medium underline"
+                >
+                  {resetLoading ? "Sending..." : "Forgot password?"}
+                </button>
+              </div>
               <input
                 id="login-password"
                 type="password"

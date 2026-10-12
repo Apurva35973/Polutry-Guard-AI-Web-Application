@@ -21,6 +21,8 @@ import {
   TrendingUp,
   Wind,
   Zap,
+  Phone,
+  PhoneCall,
 } from "lucide-react";
 import {
   CartesianGrid,
@@ -70,6 +72,30 @@ function formatTime(value) {
   } catch {
     return String(value);
   }
+}
+
+function formatVetPhone(phone) {
+  if (!phone) return null;
+  const raw = String(phone).trim();
+  const digits = raw.replace(/\D/g, "");
+  if (!digits || digits.length < 7) return null;
+  if (digits.length === 10) {
+    return {
+      display: `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`,
+      dial: `+91${digits}`,
+    };
+  }
+  if (digits.length === 12 && digits.startsWith("91")) {
+    const local = digits.slice(2);
+    return {
+      display: `+91 ${local.slice(0, 5)} ${local.slice(5)}`,
+      dial: `+${digits}`,
+    };
+  }
+  return {
+    display: raw,
+    dial: raw.startsWith("+") ? raw : `+${digits}`,
+  };
 }
 
 function FarmerProfileModal({ onComplete }) {
@@ -1222,26 +1248,68 @@ function FarmerDashboard() {
                   : item.status === "Cancelled"
                   ? "bg-red-50 text-red-800 border-red-200"
                   : "bg-amber-50 text-amber-800 border-amber-200";
+              const phoneObj = formatVetPhone(item.vet_phone_number);
               return (
                 <div
                   key={item.consultation_id}
                   className="rounded-xl border border-gray-200 bg-gray-50/60 p-4 hover:bg-white hover:shadow-sm transition-all"
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-9 h-9 rounded-full bg-[#166534]/10 flex items-center justify-center shrink-0">
-                        <Stethoscope size={16} className="text-[#166534]" />
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-full bg-[#166534]/10 flex items-center justify-center shrink-0 mt-0.5">
+                        <Stethoscope size={18} className="text-[#166534]" />
                       </div>
                       <div>
-                        <p className="font-bold text-gray-900 text-sm">
-                          Dr. {item.vet_name}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-bold text-gray-900 text-sm">
+                            Dr. {item.vet_name || "Assigned Veterinarian"}
+                          </p>
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            Verified Doctor
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {item.vet_specialization || "General Avian Health"}
+                          {item.vet_clinic ? ` — ${item.vet_clinic}` : ""}
                         </p>
-                        <p className="text-xs text-gray-500">
-                          {item.vet_specialization} &mdash; {item.vet_clinic}
-                        </p>
+                        {phoneObj ? (
+                          <div className="mt-1 flex items-center gap-2">
+                            <span className="inline-flex items-center gap-1 text-xs text-gray-700 font-medium">
+                              <Phone size={12} className="text-[#166534]" />
+                              <span>{phoneObj.display}</span>
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="mt-1 inline-flex items-center gap-1 text-[11px] text-gray-400 italic">
+                            <Phone size={11} />
+                            <span>Phone number not provided</span>
+                          </span>
+                        )}
                       </div>
                     </div>
+
                     <div className="flex items-center gap-2 flex-wrap">
+                      {phoneObj ? (
+                        <a
+                          href={`tel:${phoneObj.dial}`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 active:bg-emerald-900 text-white font-semibold text-xs shadow-sm transition-all hover:shadow hover:-translate-y-0.5"
+                          title={`Call Dr. ${item.vet_name || "Doctor"} at ${phoneObj.display}`}
+                        >
+                          <PhoneCall size={13} />
+                          <span>Call Veterinarian</span>
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-400 font-medium text-xs cursor-not-allowed border border-gray-200"
+                          title="Doctor's phone number is not available"
+                        >
+                          <Phone size={12} />
+                          <span>Call Unavailable</span>
+                        </button>
+                      )}
+
                       <span
                         className={`text-xs font-bold px-2.5 py-1 rounded-full border ${statusColor}`}
                       >

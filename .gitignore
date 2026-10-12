@@ -8,3 +8,4 @@ ml/models/image/*.pth
 ml/models/**/*.onnx
 ml/datasets/
 ml/**/__pycache__/
+.env.example

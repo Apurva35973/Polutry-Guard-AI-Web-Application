@@ -1,0 +1,350 @@
+import os
+import json
+import urllib.request
+import urllib.error
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Ensure .env is loaded
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+
+from utlis.db_utlis import executeQuery
+
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://uhgbahpyfzbficruiaos.supabase.co").strip().rstrip("/")
+if SUPABASE_URL.endswith("/rest/v1"):
+    SUPABASE_URL = SUPABASE_URL[:-8].rstrip("/")
+
+SUPABASE_ANON_KEY = (
+    os.environ.get("SUPABASE_ANON_KEY", "").strip()
+    or os.environ.get("SUPABASE_KEY", "").strip()
+)
+
+SUPABASE_SERVICE_ROLE_KEY = (
+    os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    or os.environ.get("SUPABASE_KEY", "").strip()
+    or os.environ.get("SUPABASE_ANON_KEY", "").strip()
+)
+
+def verify_supabase_jwt(access_token):
+    """
+    Validates a Supabase access token (JWT) using the Supabase GoTrue Auth API.
+    Returns (True, user_data) on success, or (False, error_msg) on failure.
+    user_data contains 'id' (Supabase Auth UUID), 'email', 'app_metadata', etc.
+    """
+    if not access_token:
+        return False, "Access token missing."
+
+    url = f"{SUPABASE_URL}/auth/v1/user"
+    headers = {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {access_token}"
+    }
+
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.getcode() == 200:
+                data = json.loads(resp.read().decode("utf-8"))
+                return True, data
+            return False, f"Supabase Auth returned status {resp.getcode()}"
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8") if e.fp else str(e)
+        try:
+            err_json = json.loads(body)
+            msg = err_json.get("msg") or err_json.get("error_description") or err_json.get("message") or body
+        except Exception:
+            msg = body
+        return False, f"Invalid or expired Supabase token: {msg}"
+    except Exception as e:
+        return False, f"Error verifying Supabase token: {str(e)}"
+
+def supabase_sign_in_with_password(email, password):
+    """
+    Signs in a user directly with Supabase Auth using email and password.
+    Returns (True, session_data) on success, or (False, error_msg) on failure.
+    """
+    url = f"{SUPABASE_URL}/auth/v1/token?grant_type=password"
+    headers = {
+        "apikey": SUPABASE_ANON_KEY,
+        "Content-Type": "application/json"
+    }
+    payload = json.dumps({"email": email, "password": password}).encode("utf-8")
+
+    try:
+        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.getcode() == 200:
+                return True, json.loads(resp.read().decode("utf-8"))
+            return False, "Failed to authenticate with Supabase"
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8") if e.fp else str(e)
+        try:
+            err_json = json.loads(body)
+            msg = err_json.get("msg") or err_json.get("error_description") or err_json.get("message") or body
+        except Exception:
+            msg = body
+        return False, msg
+    except Exception as e:
+        return False, f"Supabase authentication connection error: {str(e)}"
+
+def supabase_sign_up(email, password, user_metadata=None):
+    """
+    Registers a new user in Supabase Auth.
+    Returns (True, auth_data) on success, or (False, error_msg) on failure.
+    """
+    url = f"{SUPABASE_URL}/auth/v1/signup"
+    headers = {
+        "apikey": SUPABASE_ANON_KEY,
+        "Content-Type": "application/json"
+    }
+    body_data = {"email": email, "password": password}
+    if user_metadata:
+        body_data["data"] = user_metadata
+    payload = json.dumps(body_data).encode("utf-8")
+
+    try:
+        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.getcode() in (200, 201):
+                return True, json.loads(resp.read().decode("utf-8"))
+            return False, "Failed to register user in Supabase"
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8") if e.fp else str(e)
+        try:
+            err_json = json.loads(body)
+            msg = err_json.get("msg") or err_json.get("error_description") or err_json.get("message") or body
+        except Exception:
+            msg = body
+        return False, msg
+    except Exception as e:
+        return False, f"Supabase registration connection error: {str(e)}"
+
+def supabase_admin_create_user(email, password, user_metadata=None):
+    """
+    Creates and immediately confirms a user via Supabase GoTrue Admin API.
+    Bypasses public signup email rate limits and sets email_confirm=True.
+    Returns (True, user_data) or (False, error_msg).
+    """
+    if not SUPABASE_SERVICE_ROLE_KEY:
+        return False, "SUPABASE_SERVICE_ROLE_KEY is not configured."
+
+    url = f"{SUPABASE_URL}/auth/v1/admin/users"
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json"
+    }
+    body_data = {
+        "email": email,
+        "password": password,
+        "email_confirm": True
+    }
+    if user_metadata:
+        body_data["user_metadata"] = user_metadata
+    payload = json.dumps(body_data).encode("utf-8")
+
+    try:
+        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.getcode() in (200, 201):
+                return True, json.loads(resp.read().decode("utf-8"))
+            return False, f"Admin API returned {resp.getcode()}"
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8") if e.fp else str(e)
+        try:
+            err_json = json.loads(body)
+            msg = err_json.get("msg") or err_json.get("error_description") or err_json.get("message") or body
+        except Exception:
+            msg = body
+        return False, msg
+    except Exception as e:
+        return False, f"Admin user creation connection error: {str(e)}"
+
+def supabase_admin_set_password(supabase_user_id, password):
+    """
+    Updates a user's password and ensures email_confirm=True via Supabase Admin API.
+    """
+    if not SUPABASE_SERVICE_ROLE_KEY or not supabase_user_id:
+        return False, "Missing credentials or user ID."
+
+    url = f"{SUPABASE_URL}/auth/v1/admin/users/{supabase_user_id}"
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json"
+    }
+    body_data = {
+        "password": password,
+        "email_confirm": True
+    }
+    payload = json.dumps(body_data).encode("utf-8")
+
+    try:
+        req = urllib.request.Request(url, data=payload, headers=headers, method="PUT")
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.getcode() == 200:
+                return True, json.loads(resp.read().decode("utf-8"))
+            return False, f"Admin update returned {resp.getcode()}"
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8") if e.fp else str(e)
+        return False, body
+    except Exception as e:
+        return False, str(e)
+
+def supabase_admin_get_user_by_email(email):
+    """
+    Finds a user in Supabase Auth by email using the Admin API.
+    Returns (True, user_dict) or (False, None).
+    """
+    if not SUPABASE_SERVICE_ROLE_KEY or not email:
+        return False, None
+
+    url = f"{SUPABASE_URL}/auth/v1/admin/users"
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}"
+    }
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.getcode() == 200:
+                data = json.loads(resp.read().decode("utf-8"))
+                users = data.get("users", [])
+                target = str(email).strip().lower()
+                for u in users:
+                    if str(u.get("email", "")).strip().lower() == target:
+                        return True, u
+        return False, None
+    except Exception:
+        return False, None
+
+def resolve_user_profile(supabase_user_id, email=None):
+    """
+    Resolves the MySQL profile and role for a verified Supabase user.
+    1. Checks Admins, Farmers, Veterinarians, Vendors by supabase_user_id.
+    2. If not matched and email is provided, checks by email. If matched, updates
+       supabase_user_id in MySQL to link the account.
+    Returns (user_profile_dict, role_name) or (None, None).
+    """
+    # 1. ADMIN
+    if supabase_user_id:
+        rows = executeQuery(
+            "SELECT admin_id as id, full_name, email, phone_number, password_hash, role, supabase_user_id, 'Admin' as role_type FROM Admins WHERE supabase_user_id = %s",
+            (supabase_user_id,)
+        )
+        if rows:
+            user = rows[0]
+            user["role"] = "Admin"
+            return user, "Admin"
+
+    if email:
+        rows = executeQuery(
+            "SELECT admin_id as id, full_name, email, phone_number, password_hash, role, supabase_user_id, 'Admin' as role_type FROM Admins WHERE email = %s",
+            (email,)
+        )
+        if rows:
+            user = rows[0]
+            user["role"] = "Admin"
+            if supabase_user_id and not user.get("supabase_user_id"):
+                executeQuery("UPDATE Admins SET supabase_user_id = %s WHERE admin_id = %s", (supabase_user_id, user["id"]))
+                user["supabase_user_id"] = supabase_user_id
+            return user, "Admin"
+
+    # 2. FARMER
+    if supabase_user_id:
+        rows = executeQuery(
+            """SELECT farmer_id as id, full_name, email, phone_number, password_hash, farm_name, farm_type,
+                      address, latitude, longitude, total_birds, breed, wifi_ssid, status, supabase_user_id, 'Farmer' as role
+               FROM Farmers WHERE supabase_user_id = %s""",
+            (supabase_user_id,)
+        )
+        if rows:
+            user = rows[0]
+            profile_fields = ("farm_name", "farm_type", "address", "latitude", "longitude")
+            user["profile_completed"] = all(
+                user.get(field) is not None and str(user[field]).strip() != ""
+                for field in profile_fields
+            )
+            return user, "Farmer"
+
+    if email:
+        rows = executeQuery(
+            """SELECT farmer_id as id, full_name, email, phone_number, password_hash, farm_name, farm_type,
+                      address, latitude, longitude, total_birds, breed, wifi_ssid, status, supabase_user_id, 'Farmer' as role
+               FROM Farmers WHERE email = %s""",
+            (email,)
+        )
+        if rows:
+            user = rows[0]
+            profile_fields = ("farm_name", "farm_type", "address", "latitude", "longitude")
+            user["profile_completed"] = all(
+                user.get(field) is not None and str(user[field]).strip() != ""
+                for field in profile_fields
+            )
+            if supabase_user_id and not user.get("supabase_user_id"):
+                executeQuery("UPDATE Farmers SET supabase_user_id = %s WHERE farmer_id = %s", (supabase_user_id, user["id"]))
+                user["supabase_user_id"] = supabase_user_id
+            return user, "Farmer"
+
+    # 3. VETERINARIAN
+    if supabase_user_id:
+        rows = executeQuery(
+            """SELECT vet_id as id, full_name, email, phone_number, password_hash, specialization, license_number,
+                      experience_years, hospital_clinic, verification_status, certificate_url, status, supabase_user_id, 'Veterinarian' as role
+               FROM Veterinarians WHERE supabase_user_id = %s""",
+            (supabase_user_id,)
+        )
+        if rows:
+            user = rows[0]
+            profile_fields = ("specialization", "license_number", "experience_years", "hospital_clinic")
+            user["profile_completed"] = all(
+                user.get(field) is not None and str(user[field]).strip() != ""
+                for field in profile_fields
+            )
+            return user, "Veterinarian"
+
+    if email:
+        rows = executeQuery(
+            """SELECT vet_id as id, full_name, email, phone_number, password_hash, specialization, license_number,
+                      experience_years, hospital_clinic, verification_status, certificate_url, status, supabase_user_id, 'Veterinarian' as role
+               FROM Veterinarians WHERE email = %s""",
+            (email,)
+        )
+        if rows:
+            user = rows[0]
+            profile_fields = ("specialization", "license_number", "experience_years", "hospital_clinic")
+            user["profile_completed"] = all(
+                user.get(field) is not None and str(user[field]).strip() != ""
+                for field in profile_fields
+            )
+            if supabase_user_id and not user.get("supabase_user_id"):
+                executeQuery("UPDATE Veterinarians SET supabase_user_id = %s WHERE vet_id = %s", (supabase_user_id, user["id"]))
+                user["supabase_user_id"] = supabase_user_id
+            return user, "Veterinarian"
+
+    # 4. VENDOR
+    if supabase_user_id:
+        rows = executeQuery(
+            """SELECT vendor_id as id, full_name, email, phone_number, password_hash, business_name, vendor_type,
+                      address, latitude, longitude, status, supabase_user_id, 'Vendor' as role
+               FROM Vendors WHERE supabase_user_id = %s""",
+            (supabase_user_id,)
+        )
+        if rows:
+            return rows[0], "Vendor"
+
+    if email:
+        rows = executeQuery(
+            """SELECT vendor_id as id, full_name, email, phone_number, password_hash, business_name, vendor_type,
+                      address, latitude, longitude, status, supabase_user_id, 'Vendor' as role
+               FROM Vendors WHERE email = %s""",
+            (email,)
+        )
+        if rows:
+            user = rows[0]
+            if supabase_user_id and not user.get("supabase_user_id"):
+                executeQuery("UPDATE Vendors SET supabase_user_id = %s WHERE vendor_id = %s", (supabase_user_id, user["id"]))
+                user["supabase_user_id"] = supabase_user_id
+            return user, "Vendor"
+
+    return None, None

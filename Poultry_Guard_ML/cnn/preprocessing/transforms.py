@@ -12,6 +12,7 @@ def get_train_transform(image_size: int = IMAGE_SIZE) -> transforms.Compose:
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomRotation(degrees=15),
         transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.1),
+        transforms.RandomGrayscale(p=0.15),
         transforms.ToTensor(),
         transforms.Normalize(mean=NORMALIZE_MEAN, std=NORMALIZE_STD),
     ])

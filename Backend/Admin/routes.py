@@ -7,6 +7,7 @@ from datetime import datetime
 from flask_cors import CORS
 from services.thingspeak_service import test_thingspeak_connection, mask_api_key, fetch_latest_telemetry
 from services.supabase_service import get_latest_telemetry_from_db
+from services.sync_service import sync_and_outbox
 
 
 admin_bp = Blueprint('admin',__name__)
@@ -652,6 +653,8 @@ def create_hardware_kit():
     """, (kit_code, esp8266_id, esp32_id, firmware_version, channel_id, read_key, write_key))
 
     new_kit = executeQuery("SELECT * FROM Hardware_Kits WHERE kit_code=%s", (kit_code,))
+    if new_kit:
+        sync_and_outbox("Hardware_Kits", new_kit[0]["hardware_kit_id"], "INSERT")
     return createResult(None, new_kit[0] if new_kit else {"kit_code": kit_code})
 
 
@@ -699,10 +702,14 @@ def assign_kit(data, replacement_reason=None):
         (data["farmer_id"], data.get("installation_date") or None,
          thingspeak_channel_id, thingspeak_read_api_key, thingspeak_write_api_key, esp8266_device_id,
          data["hardware_kit_id"]))
-    executeQuery("""INSERT INTO Device_Assignments (hardware_kit_id, farmer_id, farm_name_snapshot, assigned_by_admin_id, replacement_reason)
+    a_res = executeQuery("""INSERT INTO Device_Assignments (hardware_kit_id, farmer_id, farm_name_snapshot, assigned_by_admin_id, replacement_reason)
         VALUES (%s,%s,%s,%s,%s)""", (data["hardware_kit_id"], data["farmer_id"], farmer[0]["farm_name"], admin_id, replacement_reason))
+    sync_and_outbox("Hardware_Kits", data["hardware_kit_id"], "UPDATE")
+    if isinstance(a_res, dict) and a_res.get("lastrowid"):
+        sync_and_outbox("Device_Assignments", a_res["lastrowid"], "INSERT")
     if data.get("request_id"):
         executeQuery("UPDATE Hardware_Assignment_Requests SET status='Assigned' WHERE request_id=%s AND farmer_id=%s", (data["request_id"], data["farmer_id"]))
+        sync_and_outbox("Hardware_Assignment_Requests", data["request_id"], "UPDATE")
     return {"kit_code": kit[0]["kit_code"], "farmer_name": farmer[0].get("farm_name")}, None
 
 
@@ -731,6 +738,8 @@ def replace_hardware_kit():
     if str(data.get("farmer_id")) != str(current[0]["farmer_id"]): return createResult("Farmer does not own the current kit assignment", None)
     executeQuery("UPDATE Device_Assignments SET status='Replaced', unassigned_at=NOW(), replacement_reason=%s WHERE assignment_id=%s", (reason, current[0]["assignment_id"]))
     executeQuery("UPDATE Hardware_Kits SET status='Maintenance', assigned_farmer_id=NULL WHERE hardware_kit_id=%s", (old_id,))
+    sync_and_outbox("Device_Assignments", current[0]["assignment_id"], "UPDATE")
+    sync_and_outbox("Hardware_Kits", old_id, "UPDATE")
     result, error = assign_kit(data, reason)
     if error: return createResult(error, None)
     return createResult(None, result)
@@ -778,6 +787,7 @@ def update_support_ticket(ticket_id):
         return createResult("Invalid support ticket status", None)
     result = executeQuery("UPDATE Support_Tickets SET status=%s WHERE ticket_id=%s", (status, ticket_id))
     if not result["affectedRows"]: return createResult("Support ticket not found", None)
+    sync_and_outbox("Support_Tickets", ticket_id, "UPDATE")
     return createResult(None, {"ticket_id": ticket_id, "status": status})
 
 
@@ -898,6 +908,7 @@ def update_admin_profile():
         return createResult("No updatable fields provided", None)
     set_clause = ", ".join(f"{k}=%s" for k in changes)
     executeQuery(f"UPDATE Admins SET {set_clause} WHERE admin_id=%s", tuple(changes.values()) + (admin_id,))
+    sync_and_outbox("Admins", admin_id, "UPDATE")
     rows = executeQuery("SELECT admin_id, full_name, email, phone_number, role FROM Admins WHERE admin_id=%s", (admin_id,))
     return createResult(None, rows[0] if rows else {"updated": True})
 
@@ -931,6 +942,7 @@ def verify_vet(vet_id):
     if not vet:
         return createResult("Veterinarian not found", None)
     executeQuery("UPDATE Veterinarians SET verification_status=%s WHERE vet_id=%s", (new_status, vet_id))
+    sync_and_outbox("Veterinarians", vet_id, "UPDATE")
     return createResult(None, {"vet_id": vet_id, "full_name": vet[0]["full_name"], "verification_status": new_status})
 
 
@@ -963,6 +975,7 @@ def update_assignment_request_status(request_id):
     if req[0]["status"] not in ("Pending",):
         return createResult(f"Request is already in status '{req[0]['status']}' and cannot be changed", None)
     executeQuery("UPDATE Hardware_Assignment_Requests SET status=%s, updated_at=NOW() WHERE request_id=%s", (new_status, request_id))
+    sync_and_outbox("Hardware_Assignment_Requests", request_id, "UPDATE")
     return createResult(None, {"request_id": request_id, "status": new_status})
 
 

@@ -1,4 +1,10 @@
-﻿from pathlib import Path
+from pathlib import Path
+import os
+import sys
+
+PROJECT_ROOT = str(Path(__file__).resolve().parents[1])
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from flask import Flask, send_from_directory
 from flask_jwt_extended import JWTManager
@@ -9,6 +15,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from utlis.response import createResult
+from services.sync_service import start_sync_worker
 
 from auth.routes import auth_bp
 from Admin.routes import admin_bp
@@ -19,8 +26,6 @@ from Devices.routes import device_bp
 from Disease.routes import disease_bp
 from Alerts.routes import alert_bp
 from Environment.routes import environment_bp
-
-import os
 
 
 def create_app():
@@ -65,6 +70,9 @@ def create_app():
 
     jwt_mgr = JWTManager(app)
 
+    # Start background synchronization worker for outbox queue retries
+    start_sync_worker()
+
     # Register Blueprints
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(admin_bp, url_prefix="/admin")
@@ -77,7 +85,6 @@ def create_app():
     app.register_blueprint(environment_bp, url_prefix="/api")
 
     # Public static file route for vet certificates (no JWT required)
-    # Filenames are UUIDs so they are not guessable.
     @app.route("/public/certificates/<path:filename>", methods=["GET"])
     def serve_certificate_public(filename):
         cert_dir = os.path.join(
