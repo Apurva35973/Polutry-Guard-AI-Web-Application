@@ -8,6 +8,7 @@ for p in (backend_dir, project_root):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+import utlis.fix_idna
 from Backend.app import app
 
 if __name__ == "__main__":

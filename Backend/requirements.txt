@@ -28,3 +28,4 @@ xgboost>=2.0.0,<4.0.0
 # --- Deep Learning & Computer Vision (ResNet-18 Disease Classifier) ---
 torch>=2.0.0,<3.0.0
 torchvision>=0.15.0,<1.0.0
+idna>=3.7

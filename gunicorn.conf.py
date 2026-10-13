@@ -1,4 +1,32 @@
 import os
+import codecs
+
+# Preload IDNA encoding before worker threads are spawned
+try:
+    import encodings.idna
+except ImportError:
+    pass
+
+try:
+    codecs.lookup("idna")
+except LookupError:
+    try:
+        import idna
+        def _idna_search(encoding_name):
+            if str(encoding_name).lower().replace("-", "_") in ("idna", "idna_codec"):
+                def _encode(input, errors="strict"):
+                    if isinstance(input, bytes):
+                        input = input.decode("utf-8", errors=errors)
+                    return idna.encode(input), len(input)
+                def _decode(input, errors="strict"):
+                    if isinstance(input, str):
+                        input = input.encode("ascii", errors=errors)
+                    return idna.decode(input), len(input)
+                return codecs.CodecInfo(name="idna", encode=_encode, decode=_decode)
+            return None
+        codecs.register(_idna_search)
+    except Exception:
+        pass
 
 # Render dynamically assigns PORT, defaulting to 10000 on Render web services
 port = os.environ.get("PORT", "10000")

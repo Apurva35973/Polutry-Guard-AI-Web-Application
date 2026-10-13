@@ -10,6 +10,8 @@ for p in (BACKEND_DIR, PROJECT_ROOT):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+import utlis.fix_idna
+
 from flask import Flask, send_from_directory, request
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
