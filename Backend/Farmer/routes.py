@@ -66,41 +66,92 @@ def complete_profile():
         return createResult("latitude or longitude is outside the valid range", None)
 
     email = get_jwt_identity()
-    rows = executeQuery(
-        """
-        SELECT farmer_id, farm_name, farm_type, address, latitude, longitude
-        FROM Farmers
-        WHERE email=%s
-        """,
-        (email,),
-    )
-    if not rows:
-        return createResult("Farmer account not found", None)
-    existing_profile = rows[0]
-    profile_fields = ("farm_name", "farm_type", "address", "latitude", "longitude")
-    if all(existing_profile.get(field) not in (None, "") for field in profile_fields):
-        return createResult("Farm profile has already been completed", None)
 
-    executeQuery(
-        """
-        UPDATE Farmers
-        SET farm_name=%s, farm_type=%s, breed=%s, address=%s, latitude=%s, longitude=%s
-        WHERE farmer_id=%s
-        """,
-        (data["farm_name"].strip(), farm_type, breed, data["address"].strip(), latitude, longitude, existing_profile["farmer_id"]),
-    )
-    sync_and_outbox("Farmers", existing_profile["farmer_id"], "UPDATE")
+    # Retrieve existing profile from MySQL or Supabase PostgREST
+    existing_profile = None
+    try:
+        rows = executeQuery(
+            """
+            SELECT farmer_id, farm_name, farm_type, address, latitude, longitude
+            FROM Farmers
+            WHERE email=%s
+            """,
+            (email,),
+        )
+        if rows:
+            existing_profile = rows[0]
+    except Exception as e:
+        print(f"[INFO] MySQL query failed ({e}), falling back to Supabase PostgREST...")
+
+    if not existing_profile:
+        from auth.supabase_auth import _resolve_from_supabase_rest
+        u, r = _resolve_from_supabase_rest(None, email)
+        if u and r == "Farmer":
+            existing_profile = u
+
+    if not existing_profile:
+        return createResult("Farmer account not found", None)
+
+    farmer_id = existing_profile.get("farmer_id") or existing_profile.get("id")
+
+    # Update in MySQL if available
+    try:
+        executeQuery(
+            """
+            UPDATE Farmers
+            SET farm_name=%s, farm_type=%s, breed=%s, address=%s, latitude=%s, longitude=%s
+            WHERE email=%s
+            """,
+            (data["farm_name"].strip(), farm_type, breed, data["address"].strip(), latitude, longitude, email),
+        )
+        if farmer_id:
+            sync_and_outbox("Farmers", farmer_id, "UPDATE")
+    except Exception as e:
+        print(f"[WARN] Local MySQL profile update skipped: {e}")
+
+    # Always ensure updated in Supabase PostgREST
+    try:
+        import urllib.parse
+        from services.sync_service import execute_supabase_rest
+        supabase_update = {
+            "farm_name": data["farm_name"].strip(),
+            "farm_type": farm_type,
+            "address": data["address"].strip(),
+            "latitude": latitude,
+            "longitude": longitude
+        }
+        encoded_email = urllib.parse.quote(str(email).strip().lower())
+        execute_supabase_rest("PATCH", f"farmers?email=eq.{encoded_email}", supabase_update)
+    except Exception as e:
+        print(f"[WARN] Supabase REST profile update failed: {e}")
+
     return createResult(None, {"profile_completed": True})
 
 
 def current_farmer():
     """Return the authenticated farmer's core profile, or None when missing."""
-    rows = executeQuery(
-        """SELECT farmer_id, full_name, email, phone_number, farm_name, farm_type, address,
-           latitude, longitude, total_birds, status FROM Farmers WHERE email=%s""",
-        (get_jwt_identity(),),
-    )
-    return rows[0] if rows else None
+    email = get_jwt_identity()
+    try:
+        rows = executeQuery(
+            """SELECT farmer_id, full_name, email, phone_number, farm_name, farm_type, address,
+               latitude, longitude, total_birds, status FROM Farmers WHERE email=%s""",
+            (email,),
+        )
+        if rows:
+            return rows[0]
+    except Exception:
+        pass
+
+    # Fallback to Supabase PostgREST
+    try:
+        from auth.supabase_auth import _resolve_from_supabase_rest
+        user, role = _resolve_from_supabase_rest(None, email)
+        if user and role == "Farmer":
+            return user
+    except Exception:
+        pass
+
+    return None
 
 
 def farmer_only():
@@ -115,33 +166,56 @@ def farmer_only():
 def dashboard():
     farmer, error = farmer_only()
     if error: return error
-    fid = farmer["farmer_id"]
-    latest = executeQuery("""SELECT temperature, humidity, ammonia, timestamp, status FROM environment_readings
-        WHERE farm_id=%s ORDER BY timestamp DESC LIMIT 1""", (fid,))
-    alerts = executeQuery("""SELECT alert_id, category, severity, title, description, status, created_at
-        FROM Farmer_Alerts WHERE farmer_id=%s ORDER BY created_at DESC LIMIT 10""", (fid,))
-    vaccines = executeQuery("""SELECT vaccination_id, vaccine_name, target_disease, scheduled_date, status
-        FROM Vaccinations WHERE farmer_id=%s AND status <> 'Completed' ORDER BY scheduled_date LIMIT 5""", (fid,))
-    predictions = executeQuery("""SELECT predicted_class, confidence, screened_at FROM Disease_Prediction_Details
-        WHERE farmer_id=%s ORDER BY screened_at DESC LIMIT 5""", (fid,))
-    reminders = executeQuery("""SELECT reminder_id, task_name, activity_category, scheduled_at, status FROM Farmer_Reminders
-        WHERE farmer_id=%s AND status='Scheduled' ORDER BY scheduled_at LIMIT 5""", (fid,))
-    # Fetch vet consultation responses so farmer can see doctor's diagnosis and prescription
-    vet_consultations = executeQuery("""
-        SELECT vc.consultation_id, vc.disease_name, vc.recommendation, vc.status,
-               vc.consultation_date,
-               v.vet_id, v.full_name AS vet_name, v.phone_number AS vet_phone_number,
-               v.email AS vet_email, v.specialization AS vet_specialization,
-               v.hospital_clinic AS vet_clinic
-        FROM Vet_Consultations vc
-        LEFT JOIN Veterinarians v ON v.vet_id = vc.vet_id
-        WHERE vc.farmer_id=%s
-        ORDER BY vc.consultation_date DESC
-        LIMIT 20""", (fid,))
-    return createResult(None, {"farm": farmer, "environment": latest[0] if latest else None,
-        "mortality": mortality_analytics(fid), "alerts": alerts, "vaccinations": vaccines,
-        "reminders": reminders, "predictions": predictions,
-        "vet_consultations": vet_consultations})
+    fid = farmer.get("farmer_id") or farmer.get("id")
+
+    latest = []
+    alerts = []
+    vaccines = []
+    predictions = []
+    reminders = []
+    vet_consultations = []
+
+    try:
+        latest = executeQuery("""SELECT temperature, humidity, ammonia, timestamp, status FROM environment_readings
+            WHERE farm_id=%s ORDER BY timestamp DESC LIMIT 1""", (fid,))
+        alerts = executeQuery("""SELECT alert_id, category, severity, title, description, status, created_at
+            FROM Farmer_Alerts WHERE farmer_id=%s ORDER BY created_at DESC LIMIT 10""", (fid,))
+        vaccines = executeQuery("""SELECT vaccination_id, vaccine_name, target_disease, scheduled_date, status
+            FROM Vaccinations WHERE farmer_id=%s AND status <> 'Completed' ORDER BY scheduled_date LIMIT 5""", (fid,))
+        predictions = executeQuery("""SELECT predicted_class, confidence, screened_at FROM Disease_Prediction_Details
+            WHERE farmer_id=%s ORDER BY screened_at DESC LIMIT 5""", (fid,))
+        reminders = executeQuery("""SELECT reminder_id, task_name, activity_category, scheduled_at, status FROM Farmer_Reminders
+            WHERE farmer_id=%s AND status='Scheduled' ORDER BY scheduled_at LIMIT 5""", (fid,))
+        vet_consultations = executeQuery("""
+            SELECT vc.consultation_id, vc.disease_name, vc.recommendation, vc.status,
+                   vc.consultation_date,
+                   v.vet_id, v.full_name AS vet_name, v.phone_number AS vet_phone_number,
+                   v.email AS vet_email, v.specialization AS vet_specialization,
+                   v.hospital_clinic AS vet_clinic
+            FROM Vet_Consultations vc
+            LEFT JOIN Veterinarians v ON v.vet_id = vc.vet_id
+            WHERE vc.farmer_id=%s
+            ORDER BY vc.consultation_date DESC
+            LIMIT 20""", (fid,))
+    except Exception as e:
+        print(f"[WARN] MySQL queries in dashboard failed: {e}")
+
+    mortality = None
+    try:
+        mortality = mortality_analytics(fid)
+    except Exception as e:
+        print(f"[WARN] Mortality analytics skipped: {e}")
+
+    return createResult(None, {
+        "farm": farmer,
+        "environment": latest[0] if latest else None,
+        "mortality": mortality,
+        "alerts": alerts or [],
+        "vaccinations": vaccines or [],
+        "reminders": reminders or [],
+        "predictions": predictions or [],
+        "vet_consultations": vet_consultations or []
+    })
 
 
 @farmer_bp.route("/consultations", methods=["GET"])

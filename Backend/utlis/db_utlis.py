@@ -3,13 +3,30 @@ import mysql.connector
 from contextlib import contextmanager
 
 def getConnection():
+    host = os.getenv("MYSQL_HOST")
+    is_render = bool(os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID") or os.getenv("PORT"))
+
+    if not host:
+        if is_render:
+            raise ConnectionError(
+                "MYSQL_HOST is not configured in Render environment variables. "
+                "Please configure MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, and MYSQL_DATABASE."
+            )
+        host = "localhost"
+
+    port = int(os.getenv("MYSQL_PORT", "3306"))
+    user = os.getenv("MYSQL_USER", "root" if not is_render else "")
+    password = os.getenv("MYSQL_PASSWORD", "Apurva@3522" if not is_render else "")
+    database = os.getenv("MYSQL_DATABASE", "poultryguard_ai")
+
     return mysql.connector.connect(
-        host=os.getenv("MYSQL_HOST", "localhost"),
-        port=int(os.getenv("MYSQL_PORT", "3306")),
-        user=os.getenv("MYSQL_USER", "root"),
-        password=os.getenv("MYSQL_PASSWORD", "Apurva@3522"),
-        database=os.getenv("MYSQL_DATABASE", "poultryguard_ai"),
-        use_pure=True
+        host=host,
+        port=port,
+        user=user,
+        password=password,
+        database=database,
+        use_pure=True,
+        connection_timeout=5
     )
 
 def executeQuery(query, params=None):

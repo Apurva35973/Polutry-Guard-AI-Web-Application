@@ -10,12 +10,27 @@ vet_bp = Blueprint('vet', __name__)
 
 
 def current_vet():
-    rows = executeQuery(
-        """SELECT vet_id, full_name, email, phone_number, specialization, license_number,
-                  experience_years, hospital_clinic, status, verification_status, certificate_url
-           FROM Veterinarians WHERE email=%s""", (get_jwt_identity(),)
-    )
-    return rows[0] if rows else None
+    email = get_jwt_identity()
+    try:
+        rows = executeQuery(
+            """SELECT vet_id, full_name, email, phone_number, specialization, license_number,
+                      experience_years, hospital_clinic, status, verification_status, certificate_url
+               FROM Veterinarians WHERE email=%s""", (email,)
+        )
+        if rows:
+            return rows[0]
+    except Exception:
+        pass
+
+    try:
+        from auth.supabase_auth import _resolve_from_supabase_rest
+        u, r = _resolve_from_supabase_rest(None, email)
+        if u and r == "Veterinarian":
+            return u
+    except Exception:
+        pass
+
+    return None
 
 
 def vet_only():
@@ -90,9 +105,12 @@ def dashboard():
     })
 
 
-@vet_bp.route("/profile/complete", methods=["PUT"])
+@vet_bp.route("/profile/complete", methods=["PUT", "OPTIONS"])
 @jwt_required()
 def complete_profile():
+    if request.method == "OPTIONS":
+        return "", 200
+
     if get_jwt().get("role") != "Veterinarian":
         return createResult("Access Denied : Veterinarian Only", None)
     data = request.get_json(silent=True) or {}
@@ -106,15 +124,54 @@ def complete_profile():
             raise ValueError
     except (TypeError, ValueError):
         return createResult("experience_years must be a non-negative whole number", None)
-    vet = executeQuery("SELECT vet_id FROM Veterinarians WHERE email=%s", (get_jwt_identity(),))
+
+    email = get_jwt_identity()
+
+    vet = None
+    try:
+        rows = executeQuery("SELECT vet_id FROM Veterinarians WHERE email=%s", (email,))
+        if rows:
+            vet = rows[0]
+    except Exception:
+        pass
+
+    if not vet:
+        from auth.supabase_auth import _resolve_from_supabase_rest
+        u, r = _resolve_from_supabase_rest(None, email)
+        if u and r == "Veterinarian":
+            vet = u
+
     if not vet:
         return createResult("Veterinarian account not found", None)
-    executeQuery(
-        """UPDATE Veterinarians SET specialization=%s, license_number=%s, experience_years=%s, hospital_clinic=%s
-           WHERE vet_id=%s""",
-        (data["specialization"].strip(), data["license_number"].strip(), experience, data["hospital_clinic"].strip(), vet[0]["vet_id"]),
-    )
-    sync_and_outbox("Veterinarians", vet[0]["vet_id"], "UPDATE")
+
+    vid = vet.get("vet_id") or vet.get("id")
+
+    try:
+        executeQuery(
+            """UPDATE Veterinarians SET specialization=%s, license_number=%s, experience_years=%s, hospital_clinic=%s
+               WHERE email=%s""",
+            (data["specialization"].strip(), data["license_number"].strip(), experience, data["hospital_clinic"].strip(), email),
+        )
+        if vid:
+            sync_and_outbox("Veterinarians", vid, "UPDATE")
+    except Exception as e:
+        print(f"[WARN] Local MySQL vet update skipped: {e}")
+
+    # Always ensure updated in Supabase PostgREST
+    try:
+        import urllib.parse
+        from services.sync_service import execute_supabase_rest
+        supabase_update = {
+            "specialization": data["specialization"].strip(),
+            "license_number": data["license_number"].strip(),
+            "experience_years": experience,
+            "hospital_clinic": data["hospital_clinic"].strip()
+        }
+        encoded_email = urllib.parse.quote(str(email).strip().lower())
+        execute_supabase_rest("PATCH", f"veterinarians?email=eq.{encoded_email}", supabase_update)
+    except Exception as e:
+        print(f"[WARN] Supabase REST vet update failed: {e}")
+
     return createResult(None, {"profile_completed": True})
 
 
