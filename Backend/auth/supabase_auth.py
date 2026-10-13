@@ -10,19 +10,31 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 from utlis.db_utlis import executeQuery
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://uhgbahpyfzbficruiaos.supabase.co").strip().rstrip("/")
+DEFAULT_SUPABASE_URL = "https://uhgbahpyfzbficruiaos.supabase.co"
+DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVoZ2JhaHB5ZnpiZmljcnVpYW9zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY4MDI2OTksImV4cCI6MjEwMjM3ODY5OX0.WUyoydq4uOEpgH70OXMGc8Gre7tPmtEayCMPw8_-Z7U"
+DEFAULT_SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVoZ2JhaHB5ZnpiZmljcnVpYW9zIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NjgwMjY5OSwiZXhwIjoyMTAyMzc4Njk5fQ.urUYa06pdUN5oMaQ4H3KRSFafFWccFF5JvIR2zGq3vs"
+
+SUPABASE_URL = (os.environ.get("SUPABASE_URL") or DEFAULT_SUPABASE_URL).strip().rstrip("/")
 if SUPABASE_URL.endswith("/rest/v1"):
     SUPABASE_URL = SUPABASE_URL[:-8].rstrip("/")
 
+def _is_jwt(k):
+    return bool(k and str(k).strip().startswith("eyJ"))
+
+raw_anon = os.environ.get("SUPABASE_ANON_KEY", "").strip()
+raw_key = os.environ.get("SUPABASE_KEY", "").strip()
+raw_service = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+
 SUPABASE_ANON_KEY = (
-    os.environ.get("SUPABASE_ANON_KEY", "").strip()
-    or os.environ.get("SUPABASE_KEY", "").strip()
+    raw_anon if _is_jwt(raw_anon) else (
+        raw_key if _is_jwt(raw_key) else DEFAULT_SUPABASE_ANON_KEY
+    )
 )
 
 SUPABASE_SERVICE_ROLE_KEY = (
-    os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-    or os.environ.get("SUPABASE_KEY", "").strip()
-    or os.environ.get("SUPABASE_ANON_KEY", "").strip()
+    raw_service if _is_jwt(raw_service) else (
+        raw_key if _is_jwt(raw_key) else DEFAULT_SUPABASE_SERVICE_ROLE_KEY
+    )
 )
 
 def verify_supabase_jwt(access_token):

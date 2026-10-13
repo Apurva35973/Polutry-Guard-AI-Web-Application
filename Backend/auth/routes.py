@@ -216,8 +216,32 @@ def login():
     return createResult(None, user)
 
 
-@auth_bp.route("/register/farmer", methods=["POST"])
+def is_email_registered(email, table_mysql, table_supabase, pk_col):
+    """Checks whether an email is already registered, checking MySQL first with Supabase REST fallback."""
+    try:
+        res = executeQuery(f"SELECT {pk_col} FROM {table_mysql} WHERE email=%s", (email,))
+        if res:
+            return True
+    except Exception:
+        pass
+
+    try:
+        import urllib.parse
+        from services.sync_service import execute_supabase_rest
+        ok, rows = execute_supabase_rest("GET", f"{table_supabase}?email=eq.{urllib.parse.quote(email)}")
+        if ok and rows:
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
+@auth_bp.route("/register/farmer", methods=["POST", "OPTIONS"])
 def register_farmer():
+    if request.method == "OPTIONS":
+        return "", 200
+
     data = request.get_json(silent=True) or {}
 
     required_fields = ["full_name", "email", "phone_number"]
@@ -227,10 +251,7 @@ def register_farmer():
 
     email = str(data["email"]).strip().lower()
 
-    # Email uniqueness check
-    query = "SELECT farmer_id FROM Farmers WHERE email=%s"
-    result = executeQuery(query, (email,))
-    if result:
+    if is_email_registered(email, "Farmers", "farmers", "farmer_id"):
         return createResult("Email already registered", None)
 
     supabase_user_id = data.get("supabase_user_id")
@@ -279,14 +300,18 @@ def register_farmer():
         data.get("longitude")
     )
 
-    db_res = executeQuery(insert_query, params)
-    farmer_id = db_res.get("lastrowid") if isinstance(db_res, dict) else None
+    farmer_id = None
+    try:
+        db_res = executeQuery(insert_query, params)
+        farmer_id = db_res.get("lastrowid") if isinstance(db_res, dict) else None
+    except Exception as e:
+        print(f"[WARN] Local MySQL insert skipped or failed ({e})")
 
-    # Idempotent cloud sync to Supabase PostgreSQL copy
-    if farmer_id:
+    # Cloud sync to Supabase PostgreSQL
+    try:
+        from services.sync_service import execute_supabase_rest
         sync_payload = {
-            "farmer_id": farmer_id,
-            "supabase_user_id": supabase_user_id,
+            "auth_user_id": supabase_user_id,
             "full_name": data["full_name"],
             "email": email,
             "phone_number": data["phone_number"],
@@ -296,13 +321,20 @@ def register_farmer():
             "latitude": data.get("latitude"),
             "longitude": data.get("longitude")
         }
-        sync_and_outbox("Farmers", farmer_id, "INSERT", sync_payload)
+        if farmer_id:
+            sync_payload["farmer_id"] = farmer_id
+        execute_supabase_rest("POST", "farmers", sync_payload)
+    except Exception as _e:
+        print(f"[WARN] Direct Supabase REST sync failed: {_e}")
 
     return createResult(None, "Farmer Registered Successfully")
 
 
-@auth_bp.route("/register/vet", methods=["POST"])
+@auth_bp.route("/register/vet", methods=["POST", "OPTIONS"])
 def register_vet():
+    if request.method == "OPTIONS":
+        return "", 200
+
     data = request.form.to_dict() if request.form else (request.get_json(silent=True) or {})
 
     required_fields = ["full_name", "email", "phone_number"]
@@ -331,10 +363,7 @@ def register_vet():
         cert_file.save(save_path)
         cert_url = f"/admin/veterinarians/certificate/{unique_name}"
 
-    # Email uniqueness check
-    query = "SELECT vet_id FROM Veterinarians WHERE email=%s"
-    result = executeQuery(query, (email,))
-    if result:
+    if is_email_registered(email, "Veterinarians", "veterinarians", "vet_id"):
         return createResult("Email already registered", None)
 
     supabase_user_id = data.get("supabase_user_id")
@@ -391,14 +420,18 @@ def register_vet():
         cert_url
     )
 
-    db_res = executeQuery(insert_query, params)
-    vet_id = db_res.get("lastrowid") if isinstance(db_res, dict) else None
+    vet_id = None
+    try:
+        db_res = executeQuery(insert_query, params)
+        vet_id = db_res.get("lastrowid") if isinstance(db_res, dict) else None
+    except Exception as e:
+        print(f"[WARN] Local MySQL insert skipped or failed ({e})")
 
-    # Idempotent cloud sync to Supabase PostgreSQL copy
-    if vet_id:
+    # Cloud sync to Supabase PostgreSQL
+    try:
+        from services.sync_service import execute_supabase_rest
         sync_payload = {
-            "vet_id": vet_id,
-            "supabase_user_id": supabase_user_id,
+            "auth_user_id": supabase_user_id,
             "full_name": data["full_name"],
             "email": email,
             "phone_number": data["phone_number"],
@@ -409,7 +442,11 @@ def register_vet():
             "verification_status": "Pending",
             "certificate_url": cert_url
         }
-        sync_and_outbox("Veterinarians", vet_id, "INSERT", sync_payload)
+        if vet_id:
+            sync_payload["vet_id"] = vet_id
+        execute_supabase_rest("POST", "veterinarians", sync_payload)
+    except Exception as _e:
+        print(f"[WARN] Direct Supabase REST sync failed: {_e}")
 
     return createResult(
         None,
@@ -417,8 +454,11 @@ def register_vet():
     )
 
 
-@auth_bp.route("/register/vendor", methods=["POST"])
+@auth_bp.route("/register/vendor", methods=["POST", "OPTIONS"])
 def register_vendor():
+    if request.method == "OPTIONS":
+        return "", 200
+
     data = request.get_json(silent=True) or {}
 
     required_fields = ["full_name", "email", "phone_number"]
@@ -428,10 +468,7 @@ def register_vendor():
 
     email = str(data["email"]).strip().lower()
 
-    # Email uniqueness check
-    query = "SELECT vendor_id FROM Vendors WHERE email=%s"
-    result = executeQuery(query, (email,))
-    if result:
+    if is_email_registered(email, "Vendors", "vendors", "vendor_id"):
         return createResult("Email already registered", None)
 
     supabase_user_id = data.get("supabase_user_id")
@@ -468,19 +505,30 @@ def register_vendor():
         data["phone_number"],
         pwd_hash
     )
-    db_res = executeQuery(insert_query, params)
-    vendor_id = db_res.get("lastrowid") if isinstance(db_res, dict) else None
 
-    # Idempotent cloud sync to Supabase PostgreSQL copy
-    if vendor_id:
+    vendor_id = None
+    try:
+        db_res = executeQuery(insert_query, params)
+        vendor_id = db_res.get("lastrowid") if isinstance(db_res, dict) else None
+    except Exception as e:
+        print(f"[WARN] Local MySQL insert skipped or failed ({e})")
+
+    # Cloud sync to Supabase PostgreSQL
+    try:
+        from services.sync_service import execute_supabase_rest
         sync_payload = {
-            "vendor_id": vendor_id,
-            "supabase_user_id": supabase_user_id,
+            "auth_user_id": supabase_user_id,
             "full_name": data["full_name"],
+            "vendor_name": data["full_name"],
+            "owner_name": data["full_name"],
             "email": email,
             "phone_number": data["phone_number"]
         }
-        sync_and_outbox("Vendors", vendor_id, "INSERT", sync_payload)
+        if vendor_id:
+            sync_payload["vendor_id"] = vendor_id
+        execute_supabase_rest("POST", "vendors", sync_payload)
+    except Exception as _e:
+        print(f"[WARN] Direct Supabase REST sync failed: {_e}")
 
     return createResult(None, "Vendor Registered Successfully")
 

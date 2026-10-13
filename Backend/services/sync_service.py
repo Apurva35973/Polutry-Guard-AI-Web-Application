@@ -14,11 +14,22 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://uhgbahpyfzbficruiaos.supa
 if SUPABASE_URL.endswith("/rest/v1"):
     SUPABASE_URL = SUPABASE_URL[:-8].rstrip("/")
 
-# Prefer SUPABASE_SERVICE_ROLE_KEY for server-side syncing (bypasses RLS), fallback to SUPABASE_KEY / SUPABASE_ANON_KEY
+DEFAULT_SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVoZ2JhaHB5ZnpiZmljcnVpYW9zIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NjgwMjY5OSwiZXhwIjoyMTAyMzc4Njk5fQ.urUYa06pdUN5oMaQ4H3KRSFafFWccFF5JvIR2zGq3vs"
+
+def _is_jwt(k):
+    return bool(k and str(k).strip().startswith("eyJ"))
+
+raw_service = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+raw_key = os.environ.get("SUPABASE_KEY", "").strip()
+raw_anon = os.environ.get("SUPABASE_ANON_KEY", "").strip()
+
+# Prefer SUPABASE_SERVICE_ROLE_KEY for server-side syncing (bypasses RLS)
 SUPABASE_KEY = (
-    os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-    or os.environ.get("SUPABASE_KEY", "").strip()
-    or os.environ.get("SUPABASE_ANON_KEY", "").strip()
+    raw_service if _is_jwt(raw_service) else (
+        raw_key if _is_jwt(raw_key) else (
+            raw_anon if _is_jwt(raw_anon) else DEFAULT_SUPABASE_SERVICE_ROLE_KEY
+        )
+    )
 )
 
 # Explicit schema mapping from MySQL table names to Supabase table names and PKs
