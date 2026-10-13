@@ -4,11 +4,13 @@ import sys
 import re
 
 
+BACKEND_DIR = str(Path(__file__).resolve().parent)
 PROJECT_ROOT = str(Path(__file__).resolve().parents[1])
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+for p in (BACKEND_DIR, PROJECT_ROOT):
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, request
 from flask_jwt_extended import JWTManager
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -33,6 +35,7 @@ from Environment.routes import environment_bp
 def create_app():
 
     app = Flask(__name__)
+    app.url_map.strict_slashes = False
 
     # Allow local development, Netlify deployments (*.netlify.app), and optional custom origins via env
     allowed_origins = [
@@ -64,7 +67,8 @@ def create_app():
                 "allow_headers": [
                     "*",
                     "Content-Type",
-                    "Authorization"
+                    "Authorization",
+                    "X-Requested-With"
                 ],
                 "expose_headers": [
                     "Content-Type",
@@ -74,6 +78,14 @@ def create_app():
         },
         supports_credentials=True
     )
+
+    # Health check and root endpoints (GET and OPTIONS supported)
+    @app.route("/", methods=["GET", "OPTIONS"])
+    @app.route("/health", methods=["GET", "OPTIONS"])
+    def health_check():
+        if request.method == "OPTIONS":
+            return "", 200
+        return createResult(None, {"status": "healthy", "service": "Poultry Guard AI Backend"})
 
     # JWT Configuration
     app.config["JWT_SECRET_KEY"] = "poultry_guard_secret"
@@ -134,6 +146,26 @@ def create_app():
     def handle_400(error):
         return createResult(error=str(error.description), data=None)
 
+    # Global after_request fallback to guarantee CORS headers on all responses
+    @app.after_request
+    def set_cors_headers(response):
+        origin = request.headers.get("Origin")
+        if origin:
+            is_allowed = (
+                origin == "https://super-moxie-bf2daf.netlify.app"
+                or origin.endswith(".netlify.app")
+                or origin.endswith(".onrender.com")
+                or "localhost" in origin
+                or "127.0.0.1" in origin
+            )
+            if is_allowed:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept"
+                response.headers["Access-Control-Expose-Headers"] = "Content-Type, Authorization"
+        return response
+
     return app
 
 
@@ -141,5 +173,8 @@ def create_app():
 app = create_app()
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    host = os.environ.get("HOST", "0.0.0.0")
+    print(f"Starting Poultry Guard AI backend on {host}:{port}...")
+    app.run(host=host, port=port, debug=False)
 

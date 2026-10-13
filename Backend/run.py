@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -12,6 +13,9 @@ except ImportError:
     from .app import app, create_app
 
 if __name__ == "__main__":
-    print("Starting the Flask application...")
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    host = os.environ.get("HOST", "0.0.0.0")
+    print(f"Starting Poultry Guard AI backend on {host}:{port}...")
+    app.run(host=host, port=port, debug=False)
+
 

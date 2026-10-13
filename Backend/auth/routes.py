@@ -21,12 +21,14 @@ from services.sync_service import sync_and_outbox
 auth_bp = Blueprint("auth", __name__)
 
 
-@auth_bp.route("/supabase-session", methods=["POST"])
+@auth_bp.route("/supabase-session", methods=["POST", "OPTIONS"])
 def verify_session():
     """
     Direct endpoint for frontend React to exchange a Supabase access token (JWT)
     for the corresponding application user profile and role.
     """
+    if request.method == "OPTIONS":
+        return "", 200
     data = request.get_json(silent=True) or {}
     access_token = data.get("access_token")
     selected_role = data.get("role")
@@ -75,7 +77,7 @@ def verify_session():
     return createResult(None, user)
 
 
-@auth_bp.route("/login", methods=["POST"])
+@auth_bp.route("/login", methods=["POST", "OPTIONS"])
 def login():
     """
     Handles user login powered by Supabase Authentication with resilient local MySQL fallback.
@@ -84,6 +86,9 @@ def login():
     2. Or { "email": "...", "password": "...", "role": "..." } which authenticates
        via Supabase Auth and validates against MySQL records.
     """
+    if request.method == "OPTIONS":
+        return "", 200
+
     data = request.get_json(silent=True) or {}
     access_token = data.get("access_token")
     selected_role = data.get("role")
