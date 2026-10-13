@@ -124,29 +124,29 @@ def create_app():
     # JWT Error Handlers
     @jwt_mgr.invalid_token_loader
     def invalid_token_handler(error):
-        return createResult(error="Invalid JWT Token", data=None)
+        return createResult(error="Invalid JWT Token", data=None), 401
 
     @jwt_mgr.unauthorized_loader
     def unauthorized_handler(error):
-        return createResult(error="JWT Token Missing", data=None)
+        return createResult(error="JWT Token Missing", data=None), 401
 
     @jwt_mgr.expired_token_loader
     def expired_token_handler(jwt_header, jwt_payload):
-        return createResult(error="JWT Token Expired", data=None)
+        return createResult(error="JWT Token Expired", data=None), 401
 
     # Global Error Handlers
     @app.errorhandler(500)
     def handle_500(error):
         err = getattr(error, "original_exception", error)
-        return createResult(error=repr(err), data=None)
+        return createResult(error=repr(err), data=None), 500
 
     @app.errorhandler(404)
     def handle_404(error):
-        return createResult(error="Endpoint Not Found", data=None)
+        return createResult(error="Endpoint Not Found", data=None), 404
 
     @app.errorhandler(400)
     def handle_400(error):
-        return createResult(error=str(error.description), data=None)
+        return createResult(error=str(getattr(error, "description", error)), data=None), 400
 
     # Global after_request fallback to guarantee CORS headers on all responses
     @app.after_request

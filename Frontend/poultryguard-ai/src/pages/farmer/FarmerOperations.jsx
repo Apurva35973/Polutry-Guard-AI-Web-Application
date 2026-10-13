@@ -394,7 +394,7 @@ export default function FarmerOperations({ page }) {
         wifi_ssid: wifiConfig.wifi_ssid.trim(),
         wifi_password: wifiConfig.wifi_password,
       });
-      if (res?.status === 200 || !res?.error) {
+      if (res?.status === "success" || (!res?.error && res?.data)) {
         toast.success("Wi-Fi credentials saved and updated on your hardware kit!");
         setWifiConfig((prev) => ({
           ...prev,
@@ -416,7 +416,7 @@ export default function FarmerOperations({ page }) {
     setRequestingKit(true);
     try {
       const res = await requestHardwareKit({ notes: "Farmer requested via Devices dashboard" });
-      if (res?.status === 200 || !res?.error) {
+      if (res?.status === "success" || (!res?.error && res?.data)) {
         toast.success("Hardware kit request submitted to Admin!");
         void load();
       } else {

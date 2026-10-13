@@ -62,7 +62,16 @@ def get_farm_location(farm_id: str) -> dict:
         if rows and rows[0]["latitude"] is not None and rows[0]["longitude"] is not None:
             return {"lat": float(rows[0]["latitude"]), "lon": float(rows[0]["longitude"])}
     except Exception as exc:
-        logger.warning("Could not load farm location for %s: %s", farm_id, exc)
+        logger.warning("Could not load farm location from MySQL for %s: %s", farm_id, exc)
+
+    try:
+        from services.sync_service import execute_supabase_rest
+        ok, rows = execute_supabase_rest("GET", f"farmers?farmer_id=eq.{farm_id}&limit=1")
+        if ok and rows and rows[0].get("latitude") is not None and rows[0].get("longitude") is not None:
+            return {"lat": float(rows[0]["latitude"]), "lon": float(rows[0]["longitude"])}
+    except Exception as exc:
+        logger.warning("Could not load farm location from Supabase for %s: %s", farm_id, exc)
+
     return DEFAULT_LOCATION
 
 
@@ -277,36 +286,83 @@ def current_environment(farm_id: str, lat: float | None = None, lon: float | Non
 
 
 def get_history(farm_id: str, limit: int = 100, time_range: str | None = None) -> list[dict]:
-    query = """
-        SELECT id, farm_id, temperature, humidity, ammonia, timestamp, source, status
-        FROM environment_readings
-        WHERE farm_id = %s
-    """
-    params = [farm_id]
-    if time_range == "24h":
-        query += " AND timestamp >= DATE_SUB(NOW(), INTERVAL 24 HOUR)"
-    elif time_range == "7d":
-        query += " AND timestamp >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
-    elif time_range == "30d":
-        query += " AND timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+    try:
+        query = """
+            SELECT id, farm_id, temperature, humidity, ammonia, timestamp, source, status
+            FROM environment_readings
+            WHERE farm_id = %s
+        """
+        params = [farm_id]
+        if time_range == "24h":
+            query += " AND timestamp >= DATE_SUB(NOW(), INTERVAL 24 HOUR)"
+        elif time_range == "7d":
+            query += " AND timestamp >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+        elif time_range == "30d":
+            query += " AND timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
 
-    query += " ORDER BY timestamp DESC LIMIT %s"
-    params.append(limit)
+        query += " ORDER BY timestamp DESC LIMIT %s"
+        params.append(limit)
 
-    rows = executeQuery(query, tuple(params))
-    return rows
+        rows = executeQuery(query, tuple(params))
+        if rows:
+            return rows
+    except Exception as exc:
+        logger.warning("MySQL get_history failed for farm %s: %s", farm_id, exc)
+
+    # Supabase PostgREST fallback
+    try:
+        from services.sync_service import execute_supabase_rest
+        ok, rows = execute_supabase_rest("GET", f"environment_readings?farm_id=eq.{farm_id}&order=timestamp.desc&limit={limit}")
+        if ok and rows:
+            return rows
+
+        # Fallback to telemetry_records / telemetry
+        ok_tel, tel_rows = execute_supabase_rest("GET", f"telemetry?farmer_id=eq.{farm_id}&order=recorded_at.desc&limit={limit}")
+        if ok_tel and tel_rows:
+            return [
+                {
+                    "id": r.get("telemetry_id"),
+                    "farm_id": farm_id,
+                    "temperature": r.get("temperature"),
+                    "humidity": r.get("humidity"),
+                    "ammonia": r.get("ammonia"),
+                    "timestamp": r.get("recorded_at"),
+                    "source": "thingspeak",
+                    "status": "NORMAL"
+                }
+                for r in tel_rows
+            ]
+    except Exception as exc:
+        logger.warning("Supabase get_history failed for farm %s: %s", farm_id, exc)
+
+    return []
 
 
 def get_alerts(farm_id: str, limit: int = 50) -> list[dict]:
-    rows = executeQuery(
-        """
-        SELECT id, farm_id, parameter, value, threshold,
-               severity, message, timestamp, resolved
-        FROM environment_alerts
-        WHERE farm_id = %s
-        ORDER BY timestamp DESC
-        LIMIT %s
-        """,
-        (farm_id, limit),
-    )
-    return rows
+    try:
+        rows = executeQuery(
+            """
+            SELECT id, farm_id, parameter, value, threshold,
+                   severity, message, timestamp, resolved
+            FROM environment_alerts
+            WHERE farm_id = %s
+            ORDER BY timestamp DESC
+            LIMIT %s
+            """,
+            (farm_id, limit),
+        )
+        if rows is not None:
+            return rows
+    except Exception as exc:
+        logger.warning("MySQL get_alerts failed for farm %s: %s", farm_id, exc)
+
+    # Supabase PostgREST fallback
+    try:
+        from services.sync_service import execute_supabase_rest
+        ok, rows = execute_supabase_rest("GET", f"environment_alerts?farm_id=eq.{farm_id}&order=timestamp.desc&limit={limit}")
+        if ok and rows is not None:
+            return rows
+    except Exception as exc:
+        logger.warning("Supabase get_alerts failed for farm %s: %s", farm_id, exc)
+
+    return []

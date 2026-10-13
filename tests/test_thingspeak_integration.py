@@ -229,7 +229,7 @@ class TestThingSpeakIoTIntegration(unittest.TestCase):
             "/farmer/telemetry",
             headers={"Authorization": f"Bearer {unauthorized_token}"}
         )
-        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.status_code, 404)
         data = res.get_json()
         self.assertEqual(data.get("status"), "error")
 

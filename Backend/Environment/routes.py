@@ -20,8 +20,33 @@ environment_bp = Blueprint("environment", __name__)
 def owned_farm(farm_id):
     if get_jwt().get("role") != "Farmer":
         return False
-    rows = executeQuery("SELECT farmer_id FROM Farmers WHERE email=%s AND farmer_id=%s", (get_jwt_identity(), farm_id))
-    return bool(rows)
+    email = get_jwt_identity()
+    if not email or not farm_id:
+        return False
+
+    # Check MySQL first
+    try:
+        rows = executeQuery(
+            "SELECT farmer_id FROM Farmers WHERE email=%s AND farmer_id=%s",
+            (email, farm_id)
+        )
+        if rows:
+            return True
+    except Exception as exc:
+        print(f"[WARN] MySQL owned_farm query failed: {exc}")
+
+    # Fallback to Supabase PostgREST
+    try:
+        from auth.supabase_auth import _resolve_from_supabase_rest
+        user, role = _resolve_from_supabase_rest(None, email)
+        if user and role == "Farmer":
+            user_fid = str(user.get("farmer_id") or user.get("id") or "")
+            if user_fid and str(farm_id) == user_fid:
+                return True
+    except Exception as sup_exc:
+        print(f"[WARN] Supabase owned_farm fallback failed: {sup_exc}")
+
+    return False
 
 
 @environment_bp.get("/environment/current/<farm_id>")

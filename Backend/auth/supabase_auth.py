@@ -235,21 +235,23 @@ def _resolve_from_mysql(supabase_user_id, email=None):
     # 1. ADMIN
     if supabase_user_id:
         rows = executeQuery(
-            "SELECT admin_id as id, full_name, email, phone_number, password_hash, role, supabase_user_id, 'Admin' as role_type FROM Admins WHERE supabase_user_id = %s",
+            "SELECT admin_id, admin_id as id, full_name, email, phone_number, password_hash, role, supabase_user_id, 'Admin' as role_type FROM Admins WHERE supabase_user_id = %s",
             (supabase_user_id,)
         )
         if rows:
             user = rows[0]
+            user["admin_id"] = user.get("admin_id") or user.get("id")
             user["role"] = "Admin"
             return user, "Admin"
 
     if email:
         rows = executeQuery(
-            "SELECT admin_id as id, full_name, email, phone_number, password_hash, role, supabase_user_id, 'Admin' as role_type FROM Admins WHERE email = %s",
+            "SELECT admin_id, admin_id as id, full_name, email, phone_number, password_hash, role, supabase_user_id, 'Admin' as role_type FROM Admins WHERE email = %s",
             (email,)
         )
         if rows:
             user = rows[0]
+            user["admin_id"] = user.get("admin_id") or user.get("id")
             user["role"] = "Admin"
             if supabase_user_id and not user.get("supabase_user_id"):
                 try:
@@ -262,13 +264,14 @@ def _resolve_from_mysql(supabase_user_id, email=None):
     # 2. FARMER
     if supabase_user_id:
         rows = executeQuery(
-            """SELECT farmer_id as id, full_name, email, phone_number, password_hash, farm_name, farm_type,
+            """SELECT farmer_id, farmer_id as id, full_name, email, phone_number, password_hash, farm_name, farm_type,
                       address, latitude, longitude, total_birds, breed, wifi_ssid, status, supabase_user_id, 'Farmer' as role
                FROM Farmers WHERE supabase_user_id = %s""",
             (supabase_user_id,)
         )
         if rows:
             user = rows[0]
+            user["farmer_id"] = user.get("farmer_id") or user.get("id")
             profile_fields = ("farm_name", "farm_type", "address", "latitude", "longitude")
             user["profile_completed"] = all(
                 user.get(field) is not None and str(user[field]).strip() != ""
@@ -278,13 +281,14 @@ def _resolve_from_mysql(supabase_user_id, email=None):
 
     if email:
         rows = executeQuery(
-            """SELECT farmer_id as id, full_name, email, phone_number, password_hash, farm_name, farm_type,
+            """SELECT farmer_id, farmer_id as id, full_name, email, phone_number, password_hash, farm_name, farm_type,
                       address, latitude, longitude, total_birds, breed, wifi_ssid, status, supabase_user_id, 'Farmer' as role
                FROM Farmers WHERE email = %s""",
             (email,)
         )
         if rows:
             user = rows[0]
+            user["farmer_id"] = user.get("farmer_id") or user.get("id")
             profile_fields = ("farm_name", "farm_type", "address", "latitude", "longitude")
             user["profile_completed"] = all(
                 user.get(field) is not None and str(user[field]).strip() != ""
@@ -301,13 +305,14 @@ def _resolve_from_mysql(supabase_user_id, email=None):
     # 3. VETERINARIAN
     if supabase_user_id:
         rows = executeQuery(
-            """SELECT vet_id as id, full_name, email, phone_number, password_hash, specialization, license_number,
+            """SELECT vet_id, vet_id as id, full_name, email, phone_number, password_hash, specialization, license_number,
                       experience_years, hospital_clinic, verification_status, certificate_url, status, supabase_user_id, 'Veterinarian' as role
                FROM Veterinarians WHERE supabase_user_id = %s""",
             (supabase_user_id,)
         )
         if rows:
             user = rows[0]
+            user["vet_id"] = user.get("vet_id") or user.get("id")
             profile_fields = ("specialization", "license_number", "experience_years", "hospital_clinic")
             user["profile_completed"] = all(
                 user.get(field) is not None and str(user[field]).strip() != ""
@@ -317,13 +322,14 @@ def _resolve_from_mysql(supabase_user_id, email=None):
 
     if email:
         rows = executeQuery(
-            """SELECT vet_id as id, full_name, email, phone_number, password_hash, specialization, license_number,
+            """SELECT vet_id, vet_id as id, full_name, email, phone_number, password_hash, specialization, license_number,
                       experience_years, hospital_clinic, verification_status, certificate_url, status, supabase_user_id, 'Veterinarian' as role
                FROM Veterinarians WHERE email = %s""",
             (email,)
         )
         if rows:
             user = rows[0]
+            user["vet_id"] = user.get("vet_id") or user.get("id")
             profile_fields = ("specialization", "license_number", "experience_years", "hospital_clinic")
             user["profile_completed"] = all(
                 user.get(field) is not None and str(user[field]).strip() != ""
@@ -340,23 +346,26 @@ def _resolve_from_mysql(supabase_user_id, email=None):
     # 4. VENDOR
     if supabase_user_id:
         rows = executeQuery(
-            """SELECT vendor_id as id, full_name, email, phone_number, password_hash, business_name, vendor_type,
+            """SELECT vendor_id, vendor_id as id, full_name, email, phone_number, password_hash, business_name, vendor_type,
                       address, latitude, longitude, status, supabase_user_id, 'Vendor' as role
                FROM Vendors WHERE supabase_user_id = %s""",
             (supabase_user_id,)
         )
         if rows:
-            return rows[0], "Vendor"
+            user = rows[0]
+            user["vendor_id"] = user.get("vendor_id") or user.get("id")
+            return user, "Vendor"
 
     if email:
         rows = executeQuery(
-            """SELECT vendor_id as id, full_name, email, phone_number, password_hash, business_name, vendor_type,
+            """SELECT vendor_id, vendor_id as id, full_name, email, phone_number, password_hash, business_name, vendor_type,
                       address, latitude, longitude, status, supabase_user_id, 'Vendor' as role
                FROM Vendors WHERE email = %s""",
             (email,)
         )
         if rows:
             user = rows[0]
+            user["vendor_id"] = user.get("vendor_id") or user.get("id")
             if supabase_user_id and not user.get("supabase_user_id"):
                 try:
                     executeQuery("UPDATE Vendors SET supabase_user_id = %s WHERE vendor_id = %s", (supabase_user_id, user["id"]))
@@ -374,15 +383,17 @@ def _resolve_from_supabase_rest(supabase_user_id, email=None):
     """
     from services.sync_service import execute_supabase_rest
 
-    target_email = str(email).strip().lower() if email else None
+    target_email = email.strip().lower() if email else None
 
     # 1. ADMIN
     if supabase_user_id:
         ok, rows = execute_supabase_rest("GET", f"admins?auth_user_id=eq.{supabase_user_id}")
         if ok and rows:
             u = rows[0]
+            aid = u.get("admin_id")
             return {
-                "id": u.get("admin_id"),
+                "id": aid,
+                "admin_id": aid,
                 "full_name": u.get("full_name") or "Admin User",
                 "email": u.get("email"),
                 "phone_number": u.get("phone_number"),
@@ -394,8 +405,10 @@ def _resolve_from_supabase_rest(supabase_user_id, email=None):
         ok, rows = execute_supabase_rest("GET", f"admins?email=eq.{target_email}")
         if ok and rows:
             u = rows[0]
+            aid = u.get("admin_id")
             return {
-                "id": u.get("admin_id"),
+                "id": aid,
+                "admin_id": aid,
                 "full_name": u.get("full_name") or "Admin User",
                 "email": u.get("email"),
                 "phone_number": u.get("phone_number"),
@@ -408,10 +421,12 @@ def _resolve_from_supabase_rest(supabase_user_id, email=None):
         ok, rows = execute_supabase_rest("GET", f"farmers?auth_user_id=eq.{supabase_user_id}")
         if ok and rows:
             u = rows[0]
+            fid = u.get("farmer_id")
             profile_fields = ("farm_name", "farm_type", "address", "latitude", "longitude")
             profile_completed = all(u.get(f) is not None and str(u[f]).strip() != "" for f in profile_fields)
             return {
-                "id": u.get("farmer_id"),
+                "id": fid,
+                "farmer_id": fid,
                 "full_name": u.get("full_name"),
                 "email": u.get("email"),
                 "phone_number": u.get("phone_number"),
@@ -431,10 +446,12 @@ def _resolve_from_supabase_rest(supabase_user_id, email=None):
         ok, rows = execute_supabase_rest("GET", f"farmers?email=eq.{target_email}")
         if ok and rows:
             u = rows[0]
+            fid = u.get("farmer_id")
             profile_fields = ("farm_name", "farm_type", "address", "latitude", "longitude")
             profile_completed = all(u.get(f) is not None and str(u[f]).strip() != "" for f in profile_fields)
             return {
-                "id": u.get("farmer_id"),
+                "id": fid,
+                "farmer_id": fid,
                 "full_name": u.get("full_name"),
                 "email": u.get("email"),
                 "phone_number": u.get("phone_number"),
@@ -455,10 +472,12 @@ def _resolve_from_supabase_rest(supabase_user_id, email=None):
         ok, rows = execute_supabase_rest("GET", f"veterinarians?auth_user_id=eq.{supabase_user_id}")
         if ok and rows:
             u = rows[0]
+            vid = u.get("vet_id")
             profile_fields = ("specialization", "license_number", "experience_years", "hospital_clinic")
             profile_completed = all(u.get(f) is not None and str(u[f]).strip() != "" for f in profile_fields)
             return {
-                "id": u.get("vet_id"),
+                "id": vid,
+                "vet_id": vid,
                 "full_name": u.get("full_name"),
                 "email": u.get("email"),
                 "phone_number": u.get("phone_number"),
@@ -477,10 +496,12 @@ def _resolve_from_supabase_rest(supabase_user_id, email=None):
         ok, rows = execute_supabase_rest("GET", f"veterinarians?email=eq.{target_email}")
         if ok and rows:
             u = rows[0]
+            vid = u.get("vet_id")
             profile_fields = ("specialization", "license_number", "experience_years", "hospital_clinic")
             profile_completed = all(u.get(f) is not None and str(u[f]).strip() != "" for f in profile_fields)
             return {
-                "id": u.get("vet_id"),
+                "id": vid,
+                "vet_id": vid,
                 "full_name": u.get("full_name"),
                 "email": u.get("email"),
                 "phone_number": u.get("phone_number"),
@@ -500,8 +521,10 @@ def _resolve_from_supabase_rest(supabase_user_id, email=None):
         ok, rows = execute_supabase_rest("GET", f"vendors?auth_user_id=eq.{supabase_user_id}")
         if ok and rows:
             u = rows[0]
+            vid = u.get("vendor_id")
             return {
-                "id": u.get("vendor_id"),
+                "id": vid,
+                "vendor_id": vid,
                 "full_name": u.get("owner_name") or u.get("vendor_name"),
                 "business_name": u.get("vendor_name"),
                 "email": u.get("email"),
@@ -515,8 +538,10 @@ def _resolve_from_supabase_rest(supabase_user_id, email=None):
         ok, rows = execute_supabase_rest("GET", f"vendors?email=eq.{target_email}")
         if ok and rows:
             u = rows[0]
+            vid = u.get("vendor_id")
             return {
-                "id": u.get("vendor_id"),
+                "id": vid,
+                "vendor_id": vid,
                 "full_name": u.get("owner_name") or u.get("vendor_name"),
                 "business_name": u.get("vendor_name"),
                 "email": u.get("email"),
@@ -532,15 +557,25 @@ def _resolve_from_supabase_rest(supabase_user_id, email=None):
         if found and sp_user:
             meta = sp_user.get("user_metadata") or {}
             role = meta.get("role") or "Farmer"
-            return {
-                "id": sp_user.get("id"),
+            uid = sp_user.get("id")
+            profile = {
+                "id": uid,
                 "full_name": meta.get("full_name") or sp_user.get("email", "").split("@")[0],
                 "email": sp_user.get("email"),
                 "role": role,
-                "supabase_user_id": sp_user.get("id"),
+                "supabase_user_id": uid,
                 "profile_completed": True,
                 "verification_status": "Approved" if role == "Veterinarian" else None,
-            }, role
+            }
+            if role == "Farmer":
+                profile["farmer_id"] = uid
+            elif role == "Veterinarian":
+                profile["vet_id"] = uid
+            elif role == "Vendor":
+                profile["vendor_id"] = uid
+            elif role == "Admin":
+                profile["admin_id"] = uid
+            return profile, role
 
     return None, None
 
@@ -553,16 +588,38 @@ def resolve_user_profile(supabase_user_id, email=None):
        to Supabase PostgreSQL tables and Supabase Auth metadata.
     Returns (user_profile_dict, role_name) or (None, None).
     """
+    user = None
+    role = None
     try:
         user, role = _resolve_from_mysql(supabase_user_id, email)
-        if user:
-            return user, role
     except Exception as mysql_err:
         print(f"[WARN] MySQL profile resolution error ({mysql_err}), falling back to Supabase.")
 
-    try:
-        return _resolve_from_supabase_rest(supabase_user_id, email)
-    except Exception as sup_err:
-        print(f"[ERROR] Supabase profile resolution error: {sup_err}")
-        return None, None
+    if not user:
+        try:
+            user, role = _resolve_from_supabase_rest(supabase_user_id, email)
+        except Exception as sup_err:
+            print(f"[ERROR] Supabase profile resolution error: {sup_err}")
+
+    if user and isinstance(user, dict):
+        if role == "Farmer":
+            fid = user.get("farmer_id") or user.get("id")
+            user["farmer_id"] = fid
+            user["id"] = fid
+        elif role == "Veterinarian":
+            vid = user.get("vet_id") or user.get("id")
+            user["vet_id"] = vid
+            user["id"] = vid
+        elif role == "Vendor":
+            vid = user.get("vendor_id") or user.get("id")
+            user["vendor_id"] = vid
+            user["id"] = vid
+        elif role == "Admin":
+            aid = user.get("admin_id") or user.get("id")
+            user["admin_id"] = aid
+            user["id"] = aid
+        return user, role
+
+    return None, None
+
 

@@ -47,18 +47,21 @@ def save_telemetry_record(
 
     # Deduplication check
     if thingspeak_entry_id is not None:
-        existing = executeQuery(
-            "SELECT telemetry_id FROM telemetry WHERE hardware_kit_id = %s AND thingspeak_entry_id = %s LIMIT 1",
-            (hardware_kit_id, thingspeak_entry_id)
-        )
-        if existing and len(existing) > 0:
-            return {
-                "success": True,
-                "inserted": False,
-                "is_duplicate": True,
-                "telemetry_id": existing[0]["telemetry_id"],
-                "message": "Telemetry entry already exists for this hardware kit and entry ID."
-            }
+        try:
+            existing = executeQuery(
+                "SELECT telemetry_id FROM telemetry WHERE hardware_kit_id = %s AND thingspeak_entry_id = %s LIMIT 1",
+                (hardware_kit_id, thingspeak_entry_id)
+            )
+            if existing and len(existing) > 0:
+                return {
+                    "success": True,
+                    "inserted": False,
+                    "is_duplicate": True,
+                    "telemetry_id": existing[0]["telemetry_id"],
+                    "message": "Telemetry entry already exists for this hardware kit and entry ID."
+                }
+        except Exception as e:
+            print(f"[WARN] MySQL telemetry dedup query failed: {e}")
 
     # Format timestamp
     if recorded_at is None:
@@ -111,6 +114,7 @@ def save_telemetry_record(
         formatted_recorded_at
     )
 
+    telemetry_id = None
     try:
         mysql_res = executeQuery(insert_query, insert_params)
         telemetry_id = mysql_res.get("lastrowid") if isinstance(mysql_res, dict) else None
@@ -123,7 +127,7 @@ def save_telemetry_record(
                 "is_duplicate": True,
                 "message": "Telemetry entry already exists (duplicate key constraint)."
             }
-        return {"success": False, "error": f"Failed to persist in MySQL: {str(e)}"}
+        print(f"[WARN] Failed to persist telemetry in MySQL ({e}), will sync to Supabase.")
 
     # Update Hardware_Kits timestamp
     try:
@@ -164,29 +168,53 @@ def save_telemetry_record(
     }
 
 def get_latest_telemetry_from_db(hardware_kit_id):
-    """Retrieves the most recent telemetry record for a hardware kit from the database."""
-    query = """
-        SELECT telemetry_id, hardware_kit_id, farmer_id, thingspeak_entry_id,
-               temperature, humidity, ammonia, vocalization_activity,
-               recorded_at, created_at
-        FROM telemetry
-        WHERE hardware_kit_id = %s
-        ORDER BY recorded_at DESC, telemetry_id DESC
-        LIMIT 1
-    """
-    rows = executeQuery(query, (hardware_kit_id,))
-    if rows and len(rows) > 0:
-        row = rows[0]
-        return {
-            "telemetry_id": row["telemetry_id"],
-            "hardware_kit_id": row["hardware_kit_id"],
-            "farmer_id": row["farmer_id"],
-            "thingspeak_entry_id": row["thingspeak_entry_id"],
-            "temperature": float(row["temperature"]) if row["temperature"] is not None else None,
-            "humidity": float(row["humidity"]) if row["humidity"] is not None else None,
-            "ammonia": float(row["ammonia"]) if row["ammonia"] is not None else None,
-            "vocalization_activity": float(row["vocalization_activity"]) if row["vocalization_activity"] is not None else None,
-            "recorded_at": row["recorded_at"].isoformat() if hasattr(row["recorded_at"], 'isoformat') else str(row["recorded_at"]),
-            "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], 'isoformat') else str(row["created_at"])
-        }
+    """Retrieves the most recent telemetry record for a hardware kit from MySQL or Supabase."""
+    try:
+        query = """
+            SELECT telemetry_id, hardware_kit_id, farmer_id, thingspeak_entry_id,
+                   temperature, humidity, ammonia, vocalization_activity,
+                   recorded_at, created_at
+            FROM telemetry
+            WHERE hardware_kit_id = %s
+            ORDER BY recorded_at DESC, telemetry_id DESC
+            LIMIT 1
+        """
+        rows = executeQuery(query, (hardware_kit_id,))
+        if rows and len(rows) > 0:
+            row = rows[0]
+            return {
+                "telemetry_id": row["telemetry_id"],
+                "hardware_kit_id": row["hardware_kit_id"],
+                "farmer_id": row["farmer_id"],
+                "thingspeak_entry_id": row["thingspeak_entry_id"],
+                "temperature": float(row["temperature"]) if row["temperature"] is not None else None,
+                "humidity": float(row["humidity"]) if row["humidity"] is not None else None,
+                "ammonia": float(row["ammonia"]) if row["ammonia"] is not None else None,
+                "vocalization_activity": float(row["vocalization_activity"]) if row["vocalization_activity"] is not None else None,
+                "recorded_at": row["recorded_at"].isoformat() if hasattr(row["recorded_at"], 'isoformat') else str(row["recorded_at"]),
+                "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], 'isoformat') else str(row["created_at"])
+            }
+    except Exception as e:
+        print(f"[WARN] MySQL get_latest_telemetry_from_db error: {e}")
+
+    # Fallback to Supabase
+    try:
+        ok, rows = execute_supabase_rest("GET", f"telemetry?hardware_kit_id=eq.{hardware_kit_id}&order=recorded_at.desc&limit=1")
+        if ok and rows:
+            row = rows[0]
+            return {
+                "telemetry_id": row.get("telemetry_id"),
+                "hardware_kit_id": row.get("hardware_kit_id"),
+                "farmer_id": row.get("farmer_id"),
+                "thingspeak_entry_id": row.get("thingspeak_entry_id"),
+                "temperature": float(row["temperature"]) if row.get("temperature") is not None else None,
+                "humidity": float(row["humidity"]) if row.get("humidity") is not None else None,
+                "ammonia": float(row["ammonia"]) if row.get("ammonia") is not None else None,
+                "vocalization_activity": float(row["vocalization_activity"]) if row.get("vocalization_activity") is not None else None,
+                "recorded_at": str(row.get("recorded_at")),
+                "created_at": str(row.get("created_at"))
+            }
+    except Exception as e:
+        print(f"[WARN] Supabase get_latest_telemetry_from_db error: {e}")
+
     return None

@@ -131,34 +131,50 @@ def complete_profile():
 def current_farmer():
     """Return the authenticated farmer's core profile, or None when missing."""
     email = get_jwt_identity()
+    farmer = None
     try:
         rows = executeQuery(
-            """SELECT farmer_id, full_name, email, phone_number, farm_name, farm_type, address,
+            """SELECT farmer_id, farmer_id as id, full_name, email, phone_number, farm_name, farm_type, address,
                latitude, longitude, total_birds, status FROM Farmers WHERE email=%s""",
             (email,),
         )
         if rows:
-            return rows[0]
-    except Exception:
-        pass
+            farmer = rows[0]
+    except Exception as e:
+        print(f"[WARN] MySQL current_farmer error: {e}")
 
     # Fallback to Supabase PostgREST
-    try:
-        from auth.supabase_auth import _resolve_from_supabase_rest
-        user, role = _resolve_from_supabase_rest(None, email)
-        if user and role == "Farmer":
-            return user
-    except Exception:
-        pass
+    if not farmer:
+        try:
+            from auth.supabase_auth import _resolve_from_supabase_rest
+            user, role = _resolve_from_supabase_rest(None, email)
+            if user and role == "Farmer":
+                farmer = user
+        except Exception as e:
+            print(f"[WARN] Supabase current_farmer fallback error: {e}")
+
+    if farmer and isinstance(farmer, dict):
+        fid = farmer.get("farmer_id") or farmer.get("id")
+        farmer["farmer_id"] = fid
+        farmer["id"] = fid
+        return farmer
 
     return None
 
 
 def farmer_only():
-    if get_jwt().get("role") != "Farmer":
-        return None, createResult("Access Denied : Farmer Only", None)
+    claims = get_jwt()
+    if claims.get("role") != "Farmer":
+        return None, (createResult("Access Denied : Farmer Only", None), 403)
     farmer = current_farmer()
-    return farmer, None if farmer else createResult("Farmer account not found", None)
+    if not farmer:
+        return None, (createResult("Farmer account not found", None), 404)
+    fid = farmer.get("farmer_id") or farmer.get("id")
+    if not fid:
+        return None, (createResult("Farmer profile invalid: missing farmer_id", None), 400)
+    farmer["farmer_id"] = fid
+    farmer["id"] = fid
+    return farmer, None
 
 
 @farmer_bp.route("/dashboard", methods=["GET"])
@@ -655,30 +671,49 @@ def generate_report():
 @jwt_required()
 def hardware_kit_status():
     """Expose the farmer's assigned kit, or their outstanding request."""
-    if get_jwt().get("role") != "Farmer":
-        return createResult("Access Denied : Farmer Only", None)
+    farmer, error = farmer_only()
+    if error:
+        return error
 
-    farmer = current_farmer()
-    if not farmer:
-        return createResult("Farmer account not found", None)
+    fid = farmer["farmer_id"]
+    assignments = []
+    requests = []
 
-    assignments = executeQuery(
-        """SELECT hk.hardware_kit_id, hk.kit_code, hk.esp32_device_id, hk.esp8266_device_id, hk.pcb_serial_number,
-                  hk.firmware_version, hk.status, hk.installation_date, hk.last_seen_at, hk.last_telemetry_at,
-                  da.assigned_at
-           FROM Device_Assignments da
-           JOIN Hardware_Kits hk ON hk.hardware_kit_id=da.hardware_kit_id
-           WHERE da.farmer_id=%s AND da.status='Active'
-           ORDER BY da.assigned_at DESC LIMIT 1""",
-        (farmer["farmer_id"],),
-    )
-    requests = executeQuery(
-        """SELECT request_id, reason, priority, status, requested_at, updated_at
-           FROM Hardware_Assignment_Requests
-           WHERE farmer_id=%s AND status='Pending'
-           ORDER BY requested_at DESC LIMIT 1""",
-        (farmer["farmer_id"],),
-    )
+    try:
+        assignments = executeQuery(
+            """SELECT hk.hardware_kit_id, hk.kit_code, hk.esp32_device_id, hk.esp8266_device_id, hk.pcb_serial_number,
+                      hk.firmware_version, hk.status, hk.installation_date, hk.last_seen_at, hk.last_telemetry_at,
+                      da.assigned_at
+               FROM Device_Assignments da
+               JOIN Hardware_Kits hk ON hk.hardware_kit_id=da.hardware_kit_id
+               WHERE da.farmer_id=%s AND da.status='Active'
+               ORDER BY da.assigned_at DESC LIMIT 1""",
+            (fid,),
+        )
+        requests = executeQuery(
+            """SELECT request_id, reason, priority, status, requested_at, updated_at
+               FROM Hardware_Assignment_Requests
+               WHERE farmer_id=%s AND status='Pending'
+               ORDER BY requested_at DESC LIMIT 1""",
+            (fid,),
+        )
+    except Exception as e:
+        print(f"[WARN] MySQL hardware-kit status query failed ({e}), checking Supabase.")
+        try:
+            from services.sync_service import execute_supabase_rest
+            ok_da, da_rows = execute_supabase_rest("GET", f"device_assignments?farmer_id=eq.{fid}&status=eq.Active&order=assigned_at.desc&limit=1")
+            if ok_da and da_rows:
+                hk_id = da_rows[0].get("hardware_kit_id")
+                if hk_id:
+                    ok_hk, hk_rows = execute_supabase_rest("GET", f"hardware_kits?hardware_kit_id=eq.{hk_id}&limit=1")
+                    if ok_hk and hk_rows:
+                        assignments = [hk_rows[0]]
+            ok_req, req_rows = execute_supabase_rest("GET", f"hardware_assignment_requests?farmer_id=eq.{fid}&status=eq.Pending&order=requested_at.desc&limit=1")
+            if ok_req and req_rows:
+                requests = req_rows
+        except Exception as sup_e:
+            print(f"[WARN] Supabase hardware-kit fallback failed: {sup_e}")
+
     return createResult(None, {
         "assignment": assignments[0] if assignments else None,
         "request": requests[0] if requests else None,
@@ -689,59 +724,112 @@ def hardware_kit_status():
 @jwt_required()
 def request_hardware_kit():
     """Create one pending hardware request; the admin chooses an available kit."""
-    if get_jwt().get("role") != "Farmer":
-        return createResult("Access Denied : Farmer Only", None)
+    farmer, error = farmer_only()
+    if error:
+        return error
 
-    farmer = current_farmer()
-    if not farmer:
-        return createResult("Farmer account not found", None)
-    if not farmer["farm_name"] or not farmer["address"]:
-        return createResult("Complete your farm profile before requesting a hardware kit", None)
+    if not farmer.get("farm_name") or not farmer.get("address"):
+        return createResult("Complete your farm profile before requesting a hardware kit", None), 400
 
-    active = executeQuery(
-        "SELECT assignment_id FROM Device_Assignments WHERE farmer_id=%s AND status='Active' LIMIT 1",
-        (farmer["farmer_id"],),
-    )
+    fid = farmer["farmer_id"]
+
+    active = []
+    pending = []
+    try:
+        active = executeQuery(
+            "SELECT assignment_id FROM Device_Assignments WHERE farmer_id=%s AND status='Active' LIMIT 1",
+            (fid,),
+        )
+        pending = executeQuery(
+            "SELECT request_id FROM Hardware_Assignment_Requests WHERE farmer_id=%s AND status='Pending' LIMIT 1",
+            (fid,),
+        )
+    except Exception as e:
+        print(f"[WARN] MySQL query failed in request_hardware_kit ({e}), checking Supabase.")
+        try:
+            from services.sync_service import execute_supabase_rest
+            ok_a, a_rows = execute_supabase_rest("GET", f"device_assignments?farmer_id=eq.{fid}&status=eq.Active&limit=1")
+            if ok_a and a_rows:
+                active = a_rows
+            ok_p, p_rows = execute_supabase_rest("GET", f"hardware_assignment_requests?farmer_id=eq.{fid}&status=eq.Pending&limit=1")
+            if ok_p and p_rows:
+                pending = p_rows
+        except Exception:
+            pass
+
     if active:
-        return createResult("A hardware kit is already assigned to this farm", None)
+        return createResult("A hardware kit is already assigned to this farm", None), 400
 
-    pending = executeQuery(
-        "SELECT request_id FROM Hardware_Assignment_Requests WHERE farmer_id=%s AND status='Pending' LIMIT 1",
-        (farmer["farmer_id"],),
-    )
     if pending:
-        return createResult(None, {"request_id": pending[0]["request_id"], "status": "Pending"})
+        return createResult(None, {"request_id": pending[0].get("request_id"), "status": "Pending"})
 
     data = request.get_json(silent=True) or {}
     reason = (data.get("reason") or "Farmer requested a hardware kit.").strip()
     priority = (data.get("priority") or "Medium").title()
     if priority not in {"Low", "Medium", "High", "Critical"}:
-        return createResult("priority must be Low, Medium, High, or Critical", None)
+        return createResult("priority must be Low, Medium, High, or Critical", None), 400
 
-    req_res = executeQuery(
-        """INSERT INTO Hardware_Assignment_Requests
-           (farmer_id, farm_name_snapshot, location_snapshot, reason, priority)
-           VALUES (%s, %s, %s, %s, %s)""",
-        (farmer["farmer_id"], farmer["farm_name"], farmer["address"], reason, priority),
-    )
-    if isinstance(req_res, dict) and req_res.get("lastrowid"):
-        sync_and_outbox("Hardware_Assignment_Requests", req_res["lastrowid"], "INSERT")
-    return createResult(None, {"status": "Pending"})
+    try:
+        req_res = executeQuery(
+            """INSERT INTO Hardware_Assignment_Requests
+               (farmer_id, farm_name_snapshot, location_snapshot, reason, priority)
+               VALUES (%s, %s, %s, %s, %s)""",
+            (fid, farmer["farm_name"], farmer["address"], reason, priority),
+        )
+        if isinstance(req_res, dict) and req_res.get("lastrowid"):
+            sync_and_outbox("Hardware_Assignment_Requests", req_res["lastrowid"], "INSERT")
+        return createResult(None, {"status": "Pending"})
+    except Exception as e:
+        print(f"[WARN] MySQL insert failed in request_hardware_kit: {e}, attempting Supabase fallback")
+        try:
+            from services.sync_service import execute_supabase_rest
+            payload = {
+                "farmer_id": fid,
+                "farm_name_snapshot": farmer["farm_name"],
+                "location_snapshot": farmer["address"],
+                "reason": reason,
+                "priority": priority,
+                "status": "Pending",
+            }
+            ok_ins, ins_res = execute_supabase_rest("POST", "hardware_assignment_requests", payload)
+            if ok_ins:
+                return createResult(None, {"status": "Pending"})
+        except Exception as sp_err:
+            print(f"[WARN] Supabase insert failed: {sp_err}")
+        return createResult("Database operation failed: unable to submit hardware request", None), 500
 
 
 def get_farmer_active_kit(farmer_id):
     """Retrieve the farmer's active hardware kit configuration without exposing keys to response."""
-    rows = executeQuery(
-        """SELECT hk.hardware_kit_id, hk.kit_code, hk.esp8266_device_id,
-                  hk.thingspeak_channel_id, hk.thingspeak_read_api_key,
-                  hk.last_telemetry_at, hk.last_seen_at, hk.status
-           FROM Device_Assignments da
-           JOIN Hardware_Kits hk ON hk.hardware_kit_id=da.hardware_kit_id
-           WHERE da.farmer_id=%s AND da.status='Active'
-           ORDER BY da.assigned_at DESC LIMIT 1""",
-        (farmer_id,)
-    )
-    return rows[0] if rows else None
+    try:
+        rows = executeQuery(
+            """SELECT hk.hardware_kit_id, hk.kit_code, hk.esp8266_device_id,
+                      hk.thingspeak_channel_id, hk.thingspeak_read_api_key,
+                      hk.last_telemetry_at, hk.last_seen_at, hk.status
+               FROM Device_Assignments da
+               JOIN Hardware_Kits hk ON hk.hardware_kit_id=da.hardware_kit_id
+               WHERE da.farmer_id=%s AND da.status='Active'
+               ORDER BY da.assigned_at DESC LIMIT 1""",
+            (farmer_id,)
+        )
+        if rows:
+            return rows[0]
+    except Exception as e:
+        print(f"[WARN] MySQL error fetching farmer active kit: {e}")
+
+    try:
+        from services.sync_service import execute_supabase_rest
+        ok, assigns = execute_supabase_rest("GET", f"device_assignments?farmer_id=eq.{farmer_id}&status=eq.Active&order=assigned_at.desc&limit=1")
+        if ok and assigns:
+            hk_id = assigns[0].get("hardware_kit_id")
+            if hk_id:
+                ok2, kits = execute_supabase_rest("GET", f"hardware_kits?hardware_kit_id=eq.{hk_id}&limit=1")
+                if ok2 and kits:
+                    return kits[0]
+    except Exception as e:
+        print(f"[WARN] Supabase error fetching farmer active kit: {e}")
+
+    return None
 
 
 def get_or_sync_farmer_telemetry(farmer_id):
@@ -849,9 +937,10 @@ def farmer_telemetry():
     farmer, error = farmer_only()
     if error: return error
 
-    data, err = get_or_sync_farmer_telemetry(farmer["farmer_id"])
+    fid = farmer["farmer_id"]
+    data, err = get_or_sync_farmer_telemetry(fid)
     if err:
-        return createResult(err, None)
+        return createResult(err, None), 404
     return createResult(None, data)
 
 
@@ -861,19 +950,20 @@ def farmer_device_status():
     farmer, error = farmer_only()
     if error: return error
 
-    data, err = get_or_sync_farmer_telemetry(farmer["farmer_id"])
+    fid = farmer["farmer_id"]
+    data, err = get_or_sync_farmer_telemetry(fid)
     if err:
-        return createResult(err, None)
+        return createResult(err, None), 404
 
     return createResult(None, {
-        "hardware_kit_id": data["hardware_kit_id"],
-        "kit_code": data["kit_code"],
-        "esp8266_device_id": data["esp8266_device_id"],
-        "device_status": data["device_status"],
-        "is_fresh": data["is_fresh"],
-        "freshness_status": data["freshness_status"],
-        "age_seconds": data["age_seconds"],
-        "recorded_at": data["recorded_at"]
+        "hardware_kit_id": data.get("hardware_kit_id"),
+        "kit_code": data.get("kit_code"),
+        "esp8266_device_id": data.get("esp8266_device_id"),
+        "device_status": data.get("device_status"),
+        "is_fresh": data.get("is_fresh"),
+        "freshness_status": data.get("freshness_status"),
+        "age_seconds": data.get("age_seconds"),
+        "recorded_at": data.get("recorded_at")
     })
 
 
@@ -883,9 +973,10 @@ def farmer_disease_status():
     farmer, error = farmer_only()
     if error: return error
 
-    data, err = get_or_sync_farmer_telemetry(farmer["farmer_id"])
+    fid = farmer["farmer_id"]
+    data, err = get_or_sync_farmer_telemetry(fid)
     if err:
-        return createResult(err, None)
+        return createResult(err, None), 404
 
     # Telemetry must be verified as fresh (<= 300s) before feeding into AI/ML model
     if not data or not data.get("is_fresh") or not data.get("telemetry"):

@@ -2,6 +2,13 @@ import os
 import mysql.connector
 from contextlib import contextmanager
 
+def is_mysql_configured():
+    host = os.getenv("MYSQL_HOST")
+    is_render = bool(os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID") or os.getenv("PORT"))
+    if not host and is_render:
+        return False
+    return bool(host or not is_render)
+
 def getConnection():
     host = os.getenv("MYSQL_HOST")
     is_render = bool(os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID") or os.getenv("PORT"))
