@@ -1,6 +1,6 @@
 import axios from "axios";
+import { API_BASE_URL as API_URL } from "../config/api";
 
-const API_URL = "http://localhost:5000";
 
 const unwrap = (response) => response.data;
 const authConfig = () => ({

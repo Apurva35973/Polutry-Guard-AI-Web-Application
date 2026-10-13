@@ -144,7 +144,10 @@ def login():
 
             if not stored_hash:
                 new_hash = crypto.hash(password)
-                executeQuery(f"UPDATE {table_name} SET password_hash = %s WHERE {pk_col} = %s", (new_hash, user["id"]))
+                try:
+                    executeQuery(f"UPDATE {table_name} SET password_hash = %s WHERE {pk_col} = %s", (new_hash, user["id"]))
+                except Exception as _e:
+                    print(f"[WARN] Failed updating password_hash in MySQL: {_e}")
                 user["password_hash"] = new_hash
 
             # Provision or sync with Supabase Auth via Admin API
@@ -158,8 +161,12 @@ def login():
                     supabase_admin_set_password(supabase_user_id, password)
 
             if supabase_user_id:
-                executeQuery(f"UPDATE {table_name} SET supabase_user_id = %s WHERE {pk_col} = %s", (supabase_user_id, user["id"]))
+                try:
+                    executeQuery(f"UPDATE {table_name} SET supabase_user_id = %s WHERE {pk_col} = %s", (supabase_user_id, user["id"]))
+                except Exception as _e:
+                    print(f"[WARN] Failed updating supabase_user_id in MySQL: {_e}")
                 user["supabase_user_id"] = supabase_user_id
+
 
             # Attempt sign-in with Supabase Auth to obtain session token
             sup_ok, sup_res = supabase_sign_in_with_password(email, password)

@@ -1,7 +1,7 @@
 import axios from "axios";
 import { toast } from "react-toastify";
+import { API_BASE_URL as BASE_URL } from "../config/api";
 
-const BASE_URL = "http://localhost:5000";
 
 // ─── Axios Instance ───────────────────────────────────────────────────────────
 const adminApi = axios.create({

@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { toast } from "react-toastify";
 import { getVetApplications, verifyVetApplication } from "../../services/adminService";
+import { API_BASE_URL } from "../../config/api";
+
 
 const statusBadge = (status) => {
   const colors = {
@@ -57,8 +59,9 @@ function VetDetailModal({ vet, onClose, onVerify }) {
     : null;
   // Use the public (no-auth) endpoint so the browser can load it directly
   const certPreviewUrl = certFilename
-    ? `http://localhost:5000/public/certificates/${certFilename}`
+    ? `${API_BASE_URL}/public/certificates/${certFilename}`
     : null;
+
   const isPdf = certFilename?.toLowerCase().endsWith(".pdf");
   const isImage = certFilename?.match(/\.(jpg|jpeg|png|gif|webp)$/i);
 

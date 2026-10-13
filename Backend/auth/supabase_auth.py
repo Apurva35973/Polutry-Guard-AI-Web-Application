@@ -218,14 +218,8 @@ def supabase_admin_get_user_by_email(email):
     except Exception:
         return False, None
 
-def resolve_user_profile(supabase_user_id, email=None):
-    """
-    Resolves the MySQL profile and role for a verified Supabase user.
-    1. Checks Admins, Farmers, Veterinarians, Vendors by supabase_user_id.
-    2. If not matched and email is provided, checks by email. If matched, updates
-       supabase_user_id in MySQL to link the account.
-    Returns (user_profile_dict, role_name) or (None, None).
-    """
+def _resolve_from_mysql(supabase_user_id, email=None):
+    """Query MySQL database for user profile and role."""
     # 1. ADMIN
     if supabase_user_id:
         rows = executeQuery(
@@ -246,7 +240,10 @@ def resolve_user_profile(supabase_user_id, email=None):
             user = rows[0]
             user["role"] = "Admin"
             if supabase_user_id and not user.get("supabase_user_id"):
-                executeQuery("UPDATE Admins SET supabase_user_id = %s WHERE admin_id = %s", (supabase_user_id, user["id"]))
+                try:
+                    executeQuery("UPDATE Admins SET supabase_user_id = %s WHERE admin_id = %s", (supabase_user_id, user["id"]))
+                except Exception:
+                    pass
                 user["supabase_user_id"] = supabase_user_id
             return user, "Admin"
 
@@ -282,7 +279,10 @@ def resolve_user_profile(supabase_user_id, email=None):
                 for field in profile_fields
             )
             if supabase_user_id and not user.get("supabase_user_id"):
-                executeQuery("UPDATE Farmers SET supabase_user_id = %s WHERE farmer_id = %s", (supabase_user_id, user["id"]))
+                try:
+                    executeQuery("UPDATE Farmers SET supabase_user_id = %s WHERE farmer_id = %s", (supabase_user_id, user["id"]))
+                except Exception:
+                    pass
                 user["supabase_user_id"] = supabase_user_id
             return user, "Farmer"
 
@@ -318,7 +318,10 @@ def resolve_user_profile(supabase_user_id, email=None):
                 for field in profile_fields
             )
             if supabase_user_id and not user.get("supabase_user_id"):
-                executeQuery("UPDATE Veterinarians SET supabase_user_id = %s WHERE vet_id = %s", (supabase_user_id, user["id"]))
+                try:
+                    executeQuery("UPDATE Veterinarians SET supabase_user_id = %s WHERE vet_id = %s", (supabase_user_id, user["id"]))
+                except Exception:
+                    pass
                 user["supabase_user_id"] = supabase_user_id
             return user, "Veterinarian"
 
@@ -343,8 +346,211 @@ def resolve_user_profile(supabase_user_id, email=None):
         if rows:
             user = rows[0]
             if supabase_user_id and not user.get("supabase_user_id"):
-                executeQuery("UPDATE Vendors SET supabase_user_id = %s WHERE vendor_id = %s", (supabase_user_id, user["id"]))
+                try:
+                    executeQuery("UPDATE Vendors SET supabase_user_id = %s WHERE vendor_id = %s", (supabase_user_id, user["id"]))
+                except Exception:
+                    pass
                 user["supabase_user_id"] = supabase_user_id
             return user, "Vendor"
 
     return None, None
+
+
+def _resolve_from_supabase_rest(supabase_user_id, email=None):
+    """
+    Fallback resolver that queries Supabase PostgREST tables when MySQL is unavailable.
+    """
+    from services.sync_service import execute_supabase_rest
+
+    target_email = str(email).strip().lower() if email else None
+
+    # 1. ADMIN
+    if supabase_user_id:
+        ok, rows = execute_supabase_rest("GET", f"admins?auth_user_id=eq.{supabase_user_id}")
+        if ok and rows:
+            u = rows[0]
+            return {
+                "id": u.get("admin_id"),
+                "full_name": u.get("full_name") or "Admin User",
+                "email": u.get("email"),
+                "phone_number": u.get("phone_number"),
+                "role": "Admin",
+                "supabase_user_id": u.get("auth_user_id") or supabase_user_id,
+            }, "Admin"
+
+    if target_email:
+        ok, rows = execute_supabase_rest("GET", f"admins?email=eq.{target_email}")
+        if ok and rows:
+            u = rows[0]
+            return {
+                "id": u.get("admin_id"),
+                "full_name": u.get("full_name") or "Admin User",
+                "email": u.get("email"),
+                "phone_number": u.get("phone_number"),
+                "role": "Admin",
+                "supabase_user_id": u.get("auth_user_id") or supabase_user_id,
+            }, "Admin"
+
+    # 2. FARMER
+    if supabase_user_id:
+        ok, rows = execute_supabase_rest("GET", f"farmers?auth_user_id=eq.{supabase_user_id}")
+        if ok and rows:
+            u = rows[0]
+            profile_fields = ("farm_name", "farm_type", "address", "latitude", "longitude")
+            profile_completed = all(u.get(f) is not None and str(u[f]).strip() != "" for f in profile_fields)
+            return {
+                "id": u.get("farmer_id"),
+                "full_name": u.get("full_name"),
+                "email": u.get("email"),
+                "phone_number": u.get("phone_number"),
+                "farm_name": u.get("farm_name"),
+                "farm_type": u.get("farm_type"),
+                "address": u.get("address"),
+                "latitude": u.get("latitude"),
+                "longitude": u.get("longitude"),
+                "total_birds": u.get("total_birds", 0),
+                "status": u.get("status", "Active"),
+                "supabase_user_id": u.get("auth_user_id") or supabase_user_id,
+                "role": "Farmer",
+                "profile_completed": profile_completed,
+            }, "Farmer"
+
+    if target_email:
+        ok, rows = execute_supabase_rest("GET", f"farmers?email=eq.{target_email}")
+        if ok and rows:
+            u = rows[0]
+            profile_fields = ("farm_name", "farm_type", "address", "latitude", "longitude")
+            profile_completed = all(u.get(f) is not None and str(u[f]).strip() != "" for f in profile_fields)
+            return {
+                "id": u.get("farmer_id"),
+                "full_name": u.get("full_name"),
+                "email": u.get("email"),
+                "phone_number": u.get("phone_number"),
+                "farm_name": u.get("farm_name"),
+                "farm_type": u.get("farm_type"),
+                "address": u.get("address"),
+                "latitude": u.get("latitude"),
+                "longitude": u.get("longitude"),
+                "total_birds": u.get("total_birds", 0),
+                "status": u.get("status", "Active"),
+                "supabase_user_id": u.get("auth_user_id") or supabase_user_id,
+                "role": "Farmer",
+                "profile_completed": profile_completed,
+            }, "Farmer"
+
+    # 3. VETERINARIAN
+    if supabase_user_id:
+        ok, rows = execute_supabase_rest("GET", f"veterinarians?auth_user_id=eq.{supabase_user_id}")
+        if ok and rows:
+            u = rows[0]
+            profile_fields = ("specialization", "license_number", "experience_years", "hospital_clinic")
+            profile_completed = all(u.get(f) is not None and str(u[f]).strip() != "" for f in profile_fields)
+            return {
+                "id": u.get("vet_id"),
+                "full_name": u.get("full_name"),
+                "email": u.get("email"),
+                "phone_number": u.get("phone_number"),
+                "specialization": u.get("specialization"),
+                "license_number": u.get("license_number"),
+                "experience_years": u.get("experience_years"),
+                "hospital_clinic": u.get("hospital_clinic"),
+                "verification_status": u.get("verification_status") or "Approved",
+                "status": u.get("status", "Available"),
+                "supabase_user_id": u.get("auth_user_id") or supabase_user_id,
+                "role": "Veterinarian",
+                "profile_completed": profile_completed,
+            }, "Veterinarian"
+
+    if target_email:
+        ok, rows = execute_supabase_rest("GET", f"veterinarians?email=eq.{target_email}")
+        if ok and rows:
+            u = rows[0]
+            profile_fields = ("specialization", "license_number", "experience_years", "hospital_clinic")
+            profile_completed = all(u.get(f) is not None and str(u[f]).strip() != "" for f in profile_fields)
+            return {
+                "id": u.get("vet_id"),
+                "full_name": u.get("full_name"),
+                "email": u.get("email"),
+                "phone_number": u.get("phone_number"),
+                "specialization": u.get("specialization"),
+                "license_number": u.get("license_number"),
+                "experience_years": u.get("experience_years"),
+                "hospital_clinic": u.get("hospital_clinic"),
+                "verification_status": u.get("verification_status") or "Approved",
+                "status": u.get("status", "Available"),
+                "supabase_user_id": u.get("auth_user_id") or supabase_user_id,
+                "role": "Veterinarian",
+                "profile_completed": profile_completed,
+            }, "Veterinarian"
+
+    # 4. VENDOR
+    if supabase_user_id:
+        ok, rows = execute_supabase_rest("GET", f"vendors?auth_user_id=eq.{supabase_user_id}")
+        if ok and rows:
+            u = rows[0]
+            return {
+                "id": u.get("vendor_id"),
+                "full_name": u.get("owner_name") or u.get("vendor_name"),
+                "business_name": u.get("vendor_name"),
+                "email": u.get("email"),
+                "phone_number": u.get("phone_number"),
+                "status": u.get("status", "Available"),
+                "supabase_user_id": u.get("auth_user_id") or supabase_user_id,
+                "role": "Vendor",
+            }, "Vendor"
+
+    if target_email:
+        ok, rows = execute_supabase_rest("GET", f"vendors?email=eq.{target_email}")
+        if ok and rows:
+            u = rows[0]
+            return {
+                "id": u.get("vendor_id"),
+                "full_name": u.get("owner_name") or u.get("vendor_name"),
+                "business_name": u.get("vendor_name"),
+                "email": u.get("email"),
+                "phone_number": u.get("phone_number"),
+                "status": u.get("status", "Available"),
+                "supabase_user_id": u.get("auth_user_id") or supabase_user_id,
+                "role": "Vendor",
+            }, "Vendor"
+
+    # 5. Fallback to Supabase Auth User Metadata
+    if target_email or supabase_user_id:
+        found, sp_user = supabase_admin_get_user_by_email(target_email) if target_email else (False, None)
+        if found and sp_user:
+            meta = sp_user.get("user_metadata") or {}
+            role = meta.get("role") or "Farmer"
+            return {
+                "id": sp_user.get("id"),
+                "full_name": meta.get("full_name") or sp_user.get("email", "").split("@")[0],
+                "email": sp_user.get("email"),
+                "role": role,
+                "supabase_user_id": sp_user.get("id"),
+                "profile_completed": True,
+                "verification_status": "Approved" if role == "Veterinarian" else None,
+            }, role
+
+    return None, None
+
+
+def resolve_user_profile(supabase_user_id, email=None):
+    """
+    Resolves the application profile and role for a user.
+    1. First attempts MySQL database query.
+    2. If MySQL fails, errors out, or returns no match, seamlessly falls back
+       to Supabase PostgreSQL tables and Supabase Auth metadata.
+    Returns (user_profile_dict, role_name) or (None, None).
+    """
+    try:
+        user, role = _resolve_from_mysql(supabase_user_id, email)
+        if user:
+            return user, role
+    except Exception as mysql_err:
+        print(f"[WARN] MySQL profile resolution error ({mysql_err}), falling back to Supabase.")
+
+    try:
+        return _resolve_from_supabase_rest(supabase_user_id, email)
+    except Exception as sup_err:
+        print(f"[ERROR] Supabase profile resolution error: {sup_err}")
+        return None, None
+

@@ -1,7 +1,7 @@
 import axios from "axios";
 import { supabase } from "./supabaseClient";
+import { API_BASE_URL as API_URL } from "../config/api";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 // Supabase Direct Auth Helpers
 export const supabaseSignIn = async (email, password) => {
@@ -42,14 +42,20 @@ export const loginUser = async ({ email, password, role }) => {
     console.warn("Supabase client sign-in exception, falling back to API:", err);
   }
 
-  // 2. Exchange token or authenticate with Flask Backend
-  const payload = accessToken
-    ? { access_token: accessToken, role }
-    : { email, password, role };
+  // 2. Exchange token or authenticate with Flask Backend (include credentials and access_token if available)
+  const payload = {
+    email,
+    password,
+    role,
+    ...(accessToken ? { access_token: accessToken } : {})
+  };
 
-  const response = await axios.post(`${API_URL}/auth/login`, payload);
+  const response = await axios.post(`${API_URL}/auth/login`, payload, {
+    timeout: 30000,
+  });
   return response.data;
 };
+
 
 // FARMER REGISTER: Registers user in Supabase Auth first, then creates MySQL profile and triggers cloud sync
 export const registerFarmer = async (data) => {

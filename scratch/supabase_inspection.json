@@ -1,14 +1,14 @@
 {
   "auth_users": [
     {
-      "id": "0a728a10-72b3-48bb-8725-7e6426bac85c",
+      "id": "75cc0ad9-be9a-4c86-bfca-f50d51729026",
       "aud": "authenticated",
       "role": "authenticated",
-      "email": "admin@poultryguard.com",
-      "email_confirmed_at": "2026-10-02T15:17:54.713893Z",
+      "email": "apurvashinde054@gmail.com",
+      "email_confirmed_at": "2026-10-12T15:19:29.431336Z",
       "phone": "",
-      "confirmed_at": "2026-10-02T15:17:54.713893Z",
-      "last_sign_in_at": "2026-10-02T15:18:17.962599Z",
+      "confirmed_at": "2026-10-12T15:19:29.431336Z",
+      "last_sign_in_at": "2026-10-12T15:19:29.84337Z",
       "app_metadata": {
         "provider": "email",
         "providers": [
@@ -16,23 +16,128 @@
         ]
       },
       "user_metadata": {
-        "email_verified": true
+        "email": "apurvashinde054@gmail.com",
+        "email_verified": true,
+        "full_name": "Apoorva Shinde",
+        "phone_verified": false,
+        "role": "Vendor",
+        "sub": "75cc0ad9-be9a-4c86-bfca-f50d51729026"
       },
       "identities": null,
-      "created_at": "2026-10-02T15:17:54.697296Z",
-      "updated_at": "2026-10-02T15:18:17.981934Z",
+      "created_at": "2026-10-12T15:19:17.760309Z",
+      "updated_at": "2026-10-12T15:19:29.846711Z",
       "is_anonymous": false
     },
     {
-      "id": "0e48f5ce-9727-49d1-b181-5f43a96e96c1",
+      "id": "98be710a-09b7-4f87-a62e-936468ea19b6",
+      "aud": "authenticated",
+      "role": "authenticated",
+      "email": "storage_test_farmer@poultryguard.com",
+      "email_confirmed_at": "2026-10-12T14:51:20.298846Z",
+      "phone": "",
+      "confirmed_at": "2026-10-12T14:51:20.298846Z",
+      "last_sign_in_at": "2026-10-12T15:03:43.308563Z",
+      "app_metadata": {
+        "provider": "email",
+        "providers": [
+          "email"
+        ]
+      },
+      "user_metadata": {
+        "email_verified": true,
+        "full_name": "Storage Test Farmer",
+        "role": "Farmer"
+      },
+      "identities": null,
+      "created_at": "2026-10-12T14:38:52.531549Z",
+      "updated_at": "2026-10-12T15:03:43.310935Z",
+      "is_anonymous": false
+    },
+    {
+      "id": "e1b3600a-be0d-46e1-96ff-75f9dc8cfaca",
+      "aud": "authenticated",
+      "role": "authenticated",
+      "email": "test_auth_farmer@poultryguard.com",
+      "email_confirmed_at": "2026-10-12T14:22:27.505511Z",
+      "phone": "",
+      "confirmed_at": "2026-10-12T14:22:27.505511Z",
+      "last_sign_in_at": "2026-10-12T18:14:17.934013Z",
+      "app_metadata": {
+        "provider": "email",
+        "providers": [
+          "email"
+        ]
+      },
+      "user_metadata": {
+        "email_verified": true,
+        "full_name": "Test Farmer User",
+        "role": "Farmer"
+      },
+      "identities": null,
+      "created_at": "2026-10-12T14:22:27.501461Z",
+      "updated_at": "2026-10-12T18:14:17.935909Z",
+      "is_anonymous": false
+    },
+    {
+      "id": "0813e51d-a309-4067-99c5-7acc8a1947fd",
+      "aud": "authenticated",
+      "role": "authenticated",
+      "email": "test_pending_vet@poultryguard.com",
+      "email_confirmed_at": "2026-10-12T14:22:23.572367Z",
+      "phone": "",
+      "confirmed_at": "2026-10-12T14:22:23.572367Z",
+      "last_sign_in_at": "2026-10-12T18:14:15.128101Z",
+      "app_metadata": {
+        "provider": "email",
+        "providers": [
+          "email"
+        ]
+      },
+      "user_metadata": {
+        "email_verified": true,
+        "full_name": "Dr. Test Pending",
+        "role": "Veterinarian"
+      },
+      "identities": null,
+      "created_at": "2026-10-12T14:22:23.542964Z",
+      "updated_at": "2026-10-12T18:14:15.132417Z",
+      "is_anonymous": false
+    },
+    {
+      "id": "eef29fb7-0560-4eff-a2a1-4f8dfbc3197b",
+      "aud": "authenticated",
+      "role": "authenticated",
+      "email": "test_approved_vet@poultryguard.com",
+      "email_confirmed_at": "2026-10-12T14:22:17.697822Z",
+      "phone": "",
+      "confirmed_at": "2026-10-12T14:22:17.697822Z",
+      "last_sign_in_at": "2026-10-12T18:14:12.897432Z",
+      "app_metadata": {
+        "provider": "email",
+        "providers": [
+          "email"
+        ]
+      },
+      "user_metadata": {
+        "email_verified": true,
+        "full_name": "Dr. Test Approved",
+        "role": "Veterinarian"
+      },
+      "identities": null,
+      "created_at": "2026-10-12T14:22:17.679019Z",
+      "updated_at": "2026-10-12T18:14:12.921914Z",
+      "is_anonymous": false
+    },
+    {
+      "id": "f7b87cf6-9c8b-439c-8b9f-c656a48af5f6",
       "aud": "authenticated",
       "role": "authenticated",
       "email": "shindeapurva84@gmail.com",
-      "email_confirmed_at": "2026-10-02T14:46:15.848473Z",
+      "email_confirmed_at": "2026-10-10T14:28:04.869571Z",
       "phone": "",
-      "confirmation_sent_at": "2026-10-02T14:45:32.975477Z",
-      "confirmed_at": "2026-10-02T14:46:15.848473Z",
-      "last_sign_in_at": "2026-10-02T14:46:26.610619Z",
+      "confirmation_sent_at": "2026-10-10T14:27:36.128394Z",
+      "confirmed_at": "2026-10-10T14:28:04.869571Z",
+      "last_sign_in_at": "2026-10-13T05:54:02.204881Z",
       "app_metadata": {
         "provider": "email",
         "providers": [
@@ -45,20 +150,22 @@
         "full_name": "Apurva Shinde",
         "phone_verified": false,
         "role": "Farmer",
-        "sub": "0e48f5ce-9727-49d1-b181-5f43a96e96c1"
+        "sub": "f7b87cf6-9c8b-439c-8b9f-c656a48af5f6"
       },
       "identities": null,
-      "created_at": "2026-10-02T14:45:32.946354Z",
-      "updated_at": "2026-10-02T14:46:26.613442Z",
+      "created_at": "2026-10-10T14:27:36.089418Z",
+      "updated_at": "2026-10-13T05:54:02.222934Z",
       "is_anonymous": false
     },
     {
-      "id": "e76b33b8-c59f-4955-b961-38409d34b455",
+      "id": "0a728a10-72b3-48bb-8725-7e6426bac85c",
       "aud": "authenticated",
       "role": "authenticated",
-      "email": "prathmesh@123gmail.com",
+      "email": "admin@poultryguard.com",
+      "email_confirmed_at": "2026-10-02T15:17:54.713893Z",
       "phone": "",
-      "confirmation_sent_at": "2026-10-02T14:43:28.697906Z",
+      "confirmed_at": "2026-10-02T15:17:54.713893Z",
+      "last_sign_in_at": "2026-10-13T05:49:30.857686Z",
       "app_metadata": {
         "provider": "email",
         "providers": [
@@ -66,45 +173,18 @@
         ]
       },
       "user_metadata": {
-        "email": "prathmesh@123gmail.com",
-        "email_verified": false,
-        "phone_verified": false,
-        "sub": "e76b33b8-c59f-4955-b961-38409d34b455"
+        "email_verified": true
       },
       "identities": null,
-      "created_at": "2026-10-02T14:43:28.656318Z",
-      "updated_at": "2026-10-02T14:43:31.490576Z",
-      "is_anonymous": false
-    },
-    {
-      "id": "11f5d96a-7b23-4048-8b55-067d9ec8d830",
-      "aud": "authenticated",
-      "role": "authenticated",
-      "email": "farmer@poultryguard.com",
-      "phone": "",
-      "confirmation_sent_at": "2026-09-30T08:07:21.084509Z",
-      "app_metadata": {
-        "provider": "email",
-        "providers": [
-          "email"
-        ]
-      },
-      "user_metadata": {
-        "email": "farmer@poultryguard.com",
-        "email_verified": false,
-        "phone_verified": false,
-        "sub": "11f5d96a-7b23-4048-8b55-067d9ec8d830"
-      },
-      "identities": null,
-      "created_at": "2026-09-30T08:07:21.043381Z",
-      "updated_at": "2026-09-30T08:07:24.054159Z",
+      "created_at": "2026-10-02T15:17:54.697296Z",
+      "updated_at": "2026-10-13T05:49:30.859936Z",
       "is_anonymous": false
     }
   ],
   "counts": {
     "farmers": 0,
     "veterinarians": 0,
-    "admins": 0,
+    "admins": 1,
     "vendors": 0,
     "devices": 0,
     "hardware_kits": 0,
@@ -132,5 +212,17 @@
     "farmer_reminders": 0,
     "telemetry": 0
   },
-  "admins": []
+  "admins": [
+    {
+      "admin_id": 1,
+      "auth_user_id": "0a728a10-72b3-48bb-8725-7e6426bac85c",
+      "full_name": "Admin User",
+      "email": "admin@poultryguard.com",
+      "phone_number": null,
+      "password_hash": null,
+      "role": "Super Admin",
+      "created_at": "2026-10-02T15:41:12.9488+00:00",
+      "updated_at": "2026-10-02T15:43:51.883106+00:00"
+    }
+  ]
 }

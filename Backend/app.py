@@ -1,6 +1,8 @@
 from pathlib import Path
 import os
 import sys
+import re
+
 
 PROJECT_ROOT = str(Path(__file__).resolve().parents[1])
 if PROJECT_ROOT not in sys.path:
@@ -32,14 +34,25 @@ def create_app():
 
     app = Flask(__name__)
 
+    # Allow local development, Netlify deployments (*.netlify.app), and optional custom origins via env
+    allowed_origins = [
+        "https://super-moxie-bf2daf.netlify.app",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        re.compile(r"^https:\/\/.*\.netlify\.app$"),
+        re.compile(r"^https:\/\/.*\.onrender\.com$"),
+    ]
+    env_origins = os.getenv("CORS_ALLOWED_ORIGINS") or os.getenv("FRONTEND_URL")
+    if env_origins:
+        allowed_origins.extend([o.strip() for o in env_origins.split(",") if o.strip()])
+
     CORS(
         app,
         resources={
             r"/*": {
-                "origins": [
-                    "http://localhost:5173",
-                    "http://127.0.0.1:5173"
-                ],
+                "origins": allowed_origins,
                 "methods": [
                     "GET",
                     "POST",

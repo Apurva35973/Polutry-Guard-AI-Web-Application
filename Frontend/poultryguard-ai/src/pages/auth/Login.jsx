@@ -80,15 +80,39 @@ export default function Login() {
         else if (result.data.role === "Vendor") navigate("/vendor/dashboard");
         else navigate("/admin/dashboard");
       } else {
-        const msg = result.error || "Login failed";
+        let msg = result.error || "Login failed";
+        if (typeof msg === "string" && (msg.includes("InterfaceError") || msg.includes("Can't connect to MySQL"))) {
+          msg = "Database connection unavailable. Please verify backend database configuration.";
+        }
         setErrorMessage(msg);
         toast.error(msg);
       }
     } catch (err) {
-      const msg = err.response?.data?.error || "Unable to login. Please check your credentials.";
+      let msg = "Unable to login. Please check your credentials.";
+      if (!err.response) {
+        if (err.code === "ERR_NETWORK" || err.message === "Network Error") {
+          msg = "Network Error: Cannot reach backend server. Check your connection or CORS settings.";
+        } else if (err.code === "ECONNABORTED" || (err.message && err.message.includes("timeout"))) {
+          msg = "Server request timed out. Render backend may be waking up from sleep, please retry.";
+        } else {
+          msg = err.message || "Network error. Unable to reach backend.";
+        }
+      } else if (err.response?.data?.error) {
+        msg = err.response.data.error;
+        if (typeof msg === "string" && (msg.includes("InterfaceError") || msg.includes("Can't connect to MySQL"))) {
+          msg = "Database connection unavailable. Please verify backend database configuration.";
+        }
+      } else if (err.response?.status === 401) {
+        msg = "Invalid email or password.";
+      } else if (err.response?.status === 403) {
+        msg = "Access denied for this role.";
+      } else if (err.response?.status === 500) {
+        msg = "Internal server error. Please try again shortly.";
+      }
       setErrorMessage(msg);
       toast.error(msg);
-    } finally {
+    }
+ finally {
       setLoading(false);
     }
   };
