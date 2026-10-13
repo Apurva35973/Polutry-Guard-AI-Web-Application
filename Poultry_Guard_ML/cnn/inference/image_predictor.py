@@ -10,12 +10,12 @@ and exact probability distribution across all 3 classes:
 
 from __future__ import annotations
 
+import gc
 import json
-from functools import lru_cache
+import threading
 from pathlib import Path
 from typing import Any, BinaryIO, Dict, Tuple
 
-import torch
 from PIL import Image, UnidentifiedImageError
 
 from Poultry_Guard_ML.cnn.config import (
@@ -25,9 +25,13 @@ from Poultry_Guard_ML.cnn.config import (
     MODEL_PATH,
     RAW_INDEX_TO_CLASS,
 )
-from Poultry_Guard_ML.cnn.model.resnet18 import get_resnet18_model
-from Poultry_Guard_ML.cnn.preprocessing.transforms import get_inference_transform
 from Poultry_Guard_ML.common.utils import get_device, round_floats
+
+_MODEL_LOCK = threading.Lock()
+_CACHED_MODEL: Any = None
+_CACHED_IDX_TO_CLASS: Dict[int, str] | None = None
+_CACHED_DEVICE: Any = None
+_CACHED_TRANSFORM: Any = None
 
 
 class ImageModelUnavailable(FileNotFoundError):
@@ -56,31 +60,73 @@ def load_class_mapping() -> Tuple[Dict[str, int], Dict[int, str]]:
     return {name: idx for idx, name in RAW_INDEX_TO_CLASS.items()}, dict(RAW_INDEX_TO_CLASS)
 
 
-@lru_cache(maxsize=1)
-def load_image_model() -> Tuple[torch.nn.Module, Dict[int, str], torch.device]:
-    """Load and cache the trained 3-class ResNet18 model."""
-    checkpoint_path = get_model_path()
-    _, idx_to_class = load_class_mapping()
-    num_classes = len(idx_to_class)
+def load_image_model() -> Tuple[Any, Dict[int, str], Any]:
+    """Load and cache the trained 3-class ResNet18 model in a thread-safe singleton."""
+    global _CACHED_MODEL, _CACHED_IDX_TO_CLASS, _CACHED_DEVICE
+    if _CACHED_MODEL is not None and _CACHED_IDX_TO_CLASS is not None and _CACHED_DEVICE is not None:
+        return _CACHED_MODEL, _CACHED_IDX_TO_CLASS, _CACHED_DEVICE
 
-    device = get_device(prefer_gpu=True)
-    model = get_resnet18_model(num_classes=num_classes, pretrained=False)
+    with _MODEL_LOCK:
+        if _CACHED_MODEL is not None and _CACHED_IDX_TO_CLASS is not None and _CACHED_DEVICE is not None:
+            return _CACHED_MODEL, _CACHED_IDX_TO_CLASS, _CACHED_DEVICE
 
-    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        import torch
+        # Cap PyTorch threads for 512MB RAM container constraint
+        try:
+            torch.set_num_threads(1)
+        except Exception:
+            pass
+        try:
+            torch.set_num_interop_threads(1)
+        except Exception:
+            pass
 
-    if isinstance(checkpoint, dict):
-        state_dict = checkpoint.get("state_dict", checkpoint.get("model_state_dict", checkpoint))
-    else:
-        state_dict = checkpoint
+        from Poultry_Guard_ML.cnn.model.resnet18 import get_resnet18_model
 
-    if not isinstance(state_dict, dict):
-        raise ValueError("Invalid ResNet18 checkpoint: expected state_dict.")
+        checkpoint_path = get_model_path()
+        _, idx_to_class = load_class_mapping()
+        num_classes = len(idx_to_class)
 
-    model.load_state_dict(state_dict)
-    model = model.to(device)
-    model.eval()
+        device = get_device(prefer_gpu=True)
+        model = get_resnet18_model(num_classes=num_classes, pretrained=False)
 
-    return model, idx_to_class, device
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+
+        if isinstance(checkpoint, dict):
+            state_dict = checkpoint.get("state_dict", checkpoint.get("model_state_dict", checkpoint))
+        else:
+            state_dict = checkpoint
+
+        if not isinstance(state_dict, dict):
+            raise ValueError("Invalid ResNet18 checkpoint: expected state_dict.")
+
+        model.load_state_dict(state_dict)
+        model = model.to(device)
+        model.eval()
+
+        # Immediately free temporary checkpoint state from RAM
+        del checkpoint
+        del state_dict
+        gc.collect()
+
+        _CACHED_MODEL = model
+        _CACHED_IDX_TO_CLASS = idx_to_class
+        _CACHED_DEVICE = device
+
+        return _CACHED_MODEL, _CACHED_IDX_TO_CLASS, _CACHED_DEVICE
+
+
+def _get_cached_transform():
+    """Lazily load and cache inference transform."""
+    global _CACHED_TRANSFORM
+    if _CACHED_TRANSFORM is not None:
+        return _CACHED_TRANSFORM
+
+    with _MODEL_LOCK:
+        if _CACHED_TRANSFORM is None:
+            from Poultry_Guard_ML.cnn.preprocessing.transforms import get_inference_transform
+            _CACHED_TRANSFORM = get_inference_transform(image_size=IMAGE_SIZE)
+        return _CACHED_TRANSFORM
 
 
 def _load_and_validate_image(image_input: str | Path | BinaryIO | bytes | Image.Image) -> Image.Image:
@@ -129,13 +175,16 @@ def predict_image(
         - probabilities: Map of class names to probabilities summing to 1.0
         - model: 'ResNet18'
     """
+    import torch
+
     image = _load_and_validate_image(image_input)
     model, idx_to_class, device = load_image_model()
-    transform = get_inference_transform(image_size=IMAGE_SIZE)
+    transform = _get_cached_transform()
 
     tensor = transform(image).unsqueeze(0).to(device)
 
-    with torch.no_grad():
+    inference_ctx = getattr(torch, "inference_mode", torch.no_grad)
+    with inference_ctx():
         logits = model(tensor)
         probabilities = torch.softmax(logits, dim=1).squeeze(0).cpu().tolist()
 
@@ -156,3 +205,4 @@ def predict_image(
     }
 
     return round_floats(result, precision=6)
+

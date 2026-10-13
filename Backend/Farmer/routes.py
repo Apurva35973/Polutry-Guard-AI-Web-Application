@@ -11,11 +11,14 @@ PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-try:
-    from Poultry_Guard_ML.environmental.inference.environmental_predictor import predict_environmental_disease
-except Exception as _ml_err:
-    print('[WARN] Could not import predict_environmental_disease:', _ml_err)
-    predict_environmental_disease = None
+def _get_environmental_predictor():
+    try:
+        from Poultry_Guard_ML.environmental.inference.environmental_predictor import predict_environmental_disease
+        return predict_environmental_disease
+    except Exception as _ml_err:
+        print('[WARN] Could not import predict_environmental_disease:', _ml_err)
+        return None
+
 from utlis.response import createResult
 from utlis.db_utlis import executeQuery
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
@@ -836,6 +839,7 @@ def farmer_disease_status():
             "recommendation": "Ensure sensor hardware is operating normally."
         })
 
+    predict_environmental_disease = _get_environmental_predictor()
     if not predict_environmental_disease:
         return createResult("Environmental ML predictor is not loaded.", None)
 

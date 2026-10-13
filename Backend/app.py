@@ -122,3 +122,11 @@ def create_app():
         return createResult(error=str(error.description), data=None)
 
     return app
+
+
+# Module-level WSGI application instance for Gunicorn / Render deployment
+app = create_app()
+
+if __name__ == "__main__":
+    app.run(host="127.0.0.1", port=5000, debug=True)
+

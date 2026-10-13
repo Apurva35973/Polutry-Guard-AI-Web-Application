@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-from functools import lru_cache
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
-
-import joblib
-import numpy as np
-import pandas as pd
 
 from Poultry_Guard_ML.common.utils import round_floats
 from Poultry_Guard_ML.environmental.config import (
@@ -18,12 +14,10 @@ from Poultry_Guard_ML.environmental.config import (
     PREPROCESSOR_PATH,
     XGBOOST_MODEL_PATH,
 )
-from Poultry_Guard_ML.environmental.preprocessing.preprocessor import (
-    EnvironmentalInputError,
-    EnvironmentalPreprocessor,
-    normalize_probabilities,
-    parse_environmental_input,
-)
+
+_ENV_LOCK = threading.Lock()
+_CACHED_ENV_MODEL: Any = None
+_CACHED_ENV_PREPROCESSOR: Any = None
 
 
 class EnvironmentalModelUnavailable(FileNotFoundError):
@@ -41,23 +35,43 @@ def get_model_path() -> Path:
     )
 
 
-@lru_cache(maxsize=1)
 def load_environmental_model() -> Any:
-    """Load and cache the trained XGBoost environmental model in memory."""
-    model_path = get_model_path()
-    return joblib.load(model_path)
+    """Load and cache the trained XGBoost environmental model in memory (thread-safe singleton)."""
+    global _CACHED_ENV_MODEL
+    if _CACHED_ENV_MODEL is not None:
+        return _CACHED_ENV_MODEL
+
+    with _ENV_LOCK:
+        if _CACHED_ENV_MODEL is not None:
+            return _CACHED_ENV_MODEL
+
+        import joblib
+        model_path = get_model_path()
+        _CACHED_ENV_MODEL = joblib.load(model_path)
+        return _CACHED_ENV_MODEL
 
 
 # Backwards compatibility alias
 load_environmental_artifact = load_environmental_model
 
 
-@lru_cache(maxsize=1)
-def load_environmental_preprocessor() -> EnvironmentalPreprocessor:
-    """Load and cache the trained preprocessor pipeline in memory."""
-    if not PREPROCESSOR_PATH.exists():
-        raise FileNotFoundError(f"Preprocessor artifact not found at: {PREPROCESSOR_PATH}")
-    return EnvironmentalPreprocessor.load(PREPROCESSOR_PATH)
+def load_environmental_preprocessor() -> Any:
+    """Load and cache the trained preprocessor pipeline in memory (thread-safe singleton)."""
+    global _CACHED_ENV_PREPROCESSOR
+    if _CACHED_ENV_PREPROCESSOR is not None:
+        return _CACHED_ENV_PREPROCESSOR
+
+    with _ENV_LOCK:
+        if _CACHED_ENV_PREPROCESSOR is not None:
+            return _CACHED_ENV_PREPROCESSOR
+
+        if not PREPROCESSOR_PATH.exists():
+            raise FileNotFoundError(f"Preprocessor artifact not found at: {PREPROCESSOR_PATH}")
+
+        from Poultry_Guard_ML.environmental.preprocessing.preprocessor import EnvironmentalPreprocessor
+        _CACHED_ENV_PREPROCESSOR = EnvironmentalPreprocessor.load(PREPROCESSOR_PATH)
+        return _CACHED_ENV_PREPROCESSOR
+
 
 
 def predict_environment(
@@ -108,13 +122,18 @@ def predict_environment(
     return predict_environmental_disease(params)
 
 
-def predict_environmental_disease(input_data: Union[Dict[str, Any], pd.DataFrame]) -> Dict[str, Any]:
+def predict_environmental_disease(input_data: Union[Dict[str, Any], Any]) -> Dict[str, Any]:
     """
     Execute inference pipeline using the pre-fitted preprocessor and trained XGBoost model.
     """
+    from Poultry_Guard_ML.environmental.preprocessing.preprocessor import (
+        EnvironmentalInputError,
+        normalize_probabilities,
+    )
+
     if isinstance(input_data, dict):
         payload = input_data
-    elif isinstance(input_data, pd.DataFrame):
+    elif hasattr(input_data, "iloc"):
         payload = input_data.iloc[0].to_dict()
     else:
         raise EnvironmentalInputError(f"Expected dict or DataFrame, got {type(input_data).__name__}")
@@ -124,6 +143,7 @@ def predict_environmental_disease(input_data: Union[Dict[str, Any], pd.DataFrame
 
     # Preprocess feature vector
     X_proc = preprocessor.transform_dict(payload)
+
 
     # Predict probabilities
     raw_probs = model.predict_proba(X_proc)[0]

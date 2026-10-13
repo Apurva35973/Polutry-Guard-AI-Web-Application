@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Optional, Tuple
-import numpy as np
 
 from Poultry_Guard_ML.common.utils import round_floats
 from Poultry_Guard_ML.ensemble.config import (
