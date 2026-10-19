@@ -21,7 +21,6 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from utlis.response import createResult
-from services.sync_service import start_sync_worker
 
 from auth.routes import auth_bp
 from Admin.routes import admin_bp
@@ -97,8 +96,7 @@ def create_app():
 
     jwt_mgr = JWTManager(app)
 
-    # Start background synchronization worker for outbox queue retries
-    start_sync_worker()
+    # Background sync worker removed: Supabase PostgreSQL is now the sole database.
 
     # Register Blueprints
     app.register_blueprint(auth_bp, url_prefix="/auth")
