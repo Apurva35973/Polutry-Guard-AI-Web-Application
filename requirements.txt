@@ -13,7 +13,7 @@ Werkzeug>=3.0.0,<4.0.0
 python-dotenv>=1.0.0,<2.0.0
 
 # --- Database & Authentication Security ---
-mysql-connector-python>=9.0.0,<10.0.0
+psycopg2-binary>=2.9.9
 passlib>=1.7.4,<2.0.0
 
 # --- Image Processing & Data Handling ---
