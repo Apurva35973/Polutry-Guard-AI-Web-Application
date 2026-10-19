@@ -1,4 +1,4 @@
-﻿import os
+import os
 import re
 from contextlib import contextmanager
 
@@ -12,12 +12,35 @@ except ImportError as _ie:
     ) from _ie
 
 
+import urllib.parse
+
+
+def _sanitize_pg_url(url: str) -> str:
+    if not url:
+        return url
+    prefix = ""
+    for p in ("postgresql://", "postgres://"):
+        if url.startswith(p):
+            prefix = p
+            break
+    if not prefix:
+        return url
+    rest = url[len(prefix):]
+    if "@" not in rest:
+        return "postgresql://" + rest
+    userinfo, hostinfo = rest.rsplit("@", 1)
+    if ":" in userinfo:
+        user, pwd = userinfo.split(":", 1)
+        user = urllib.parse.quote(urllib.parse.unquote(user), safe="")
+        pwd = urllib.parse.quote(urllib.parse.unquote(pwd), safe="")
+        return f"postgresql://{user}:{pwd}@{hostinfo}"
+    return f"postgresql://{rest}"
+
+
 def _build_dsn() -> str:
     url = os.getenv("DATABASE_URL", "").strip()
     if url:
-        if url.startswith("postgres://"):
-            url = "postgresql://" + url[len("postgres://"):]
-        return url
+        return _sanitize_pg_url(url)
 
     host = (
         os.getenv("PGHOST")
@@ -38,7 +61,9 @@ def _build_dsn() -> str:
     database = (os.getenv("PGDATABASE") or os.getenv("DB_NAME") or "postgres").strip()
     sslmode = (os.getenv("PGSSLMODE") or os.getenv("DB_SSLMODE") or "require").strip()
 
-    return f"postgresql://{user}:{password}@{host}:{port}/{database}?sslmode={sslmode}"
+    enc_user = urllib.parse.quote(user, safe="")
+    enc_password = urllib.parse.quote(password, safe="")
+    return f"postgresql://{enc_user}:{enc_password}@{host}:{port}/{database}?sslmode={sslmode}"
 
 
 def getConnection():
