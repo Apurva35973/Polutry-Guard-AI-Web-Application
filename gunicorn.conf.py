@@ -40,10 +40,7 @@ os.environ["TORCH_NUM_THREADS"] = "1"
 port = os.environ.get("PORT", "10000")
 bind = f"0.0.0.0:{port}"
 workers = int(os.environ.get("WEB_CONCURRENCY", "1"))
-threads = int(os.environ.get("PYTHON_GET_THREADS", "1"))
+threads = int(os.environ.get("PYTHON_GET_THREADS", "2"))
 timeout = int(os.environ.get("GUNICORN_TIMEOUT", "120"))
-# Periodically recycle worker to prevent memory accumulation in glibc heap
-max_requests = 100
-max_requests_jitter = 20
 accesslog = "-"
 errorlog = "-"
