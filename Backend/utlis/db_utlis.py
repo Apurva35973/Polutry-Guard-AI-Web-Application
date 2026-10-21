@@ -18,6 +18,13 @@ import urllib.parse
 def _sanitize_pg_url(url: str) -> str:
     if not url:
         return url
+    url = url.strip().strip("'\"")
+    # Handle accidental "DATABASE_URL=..." pasted into the Render value box
+    for var_prefix in ("DATABASE_URL=", "DATABASE_URL =", "DATABASE_URI=", "DATABASE_URI ="):
+        if url.startswith(var_prefix):
+            url = url[len(var_prefix):].strip().strip("'\"")
+            break
+
     prefix = ""
     for p in ("postgresql://", "postgres://"):
         if url.startswith(p):
