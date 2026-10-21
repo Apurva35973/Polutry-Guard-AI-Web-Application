@@ -71,6 +71,7 @@ def load_image_model() -> Tuple[Any, Dict[int, str], Any]:
             return _CACHED_MODEL, _CACHED_IDX_TO_CLASS, _CACHED_DEVICE
 
         import torch
+        torch.set_grad_enabled(False)
         # Cap PyTorch threads for 512MB RAM container constraint
         try:
             torch.set_num_threads(1)
@@ -87,7 +88,7 @@ def load_image_model() -> Tuple[Any, Dict[int, str], Any]:
         _, idx_to_class = load_class_mapping()
         num_classes = len(idx_to_class)
 
-        device = get_device(prefer_gpu=True)
+        device = torch.device("cpu")
         model = get_resnet18_model(num_classes=num_classes, pretrained=False)
 
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
@@ -103,6 +104,9 @@ def load_image_model() -> Tuple[Any, Dict[int, str], Any]:
         model.load_state_dict(state_dict)
         model = model.to(device)
         model.eval()
+
+        for param in model.parameters():
+            param.requires_grad = False
 
         # Immediately free temporary checkpoint state from RAM
         del checkpoint
@@ -130,9 +134,10 @@ def _get_cached_transform():
 
 
 def _load_and_validate_image(image_input: str | Path | BinaryIO | bytes | Image.Image) -> Image.Image:
-    """Load and validate any image input, converting strictly to RGB."""
+    """Load and validate any image input, converting strictly to RGB and resizing to prevent OOM."""
     if isinstance(image_input, Image.Image):
         image = image_input.convert("RGB")
+        image.thumbnail((RESIZE_SIZE, RESIZE_SIZE), Image.Resampling.BILINEAR)
         image.load()
         return image
 
@@ -150,6 +155,7 @@ def _load_and_validate_image(image_input: str | Path | BinaryIO | bytes | Image.
             image = Image.open(image_input)
 
         image = image.convert("RGB")
+        image.thumbnail((RESIZE_SIZE, RESIZE_SIZE), Image.Resampling.BILINEAR)
         image.load()
         return image
     except (UnidentifiedImageError, OSError, ValueError, TypeError) as exc:
@@ -187,6 +193,11 @@ def predict_image(
     with inference_ctx():
         logits = model(tensor)
         probabilities = torch.softmax(logits, dim=1).squeeze(0).cpu().tolist()
+
+    del tensor
+    del logits
+    del image
+    gc.collect()
 
     prob_map = {idx_to_class[i]: float(probabilities[i]) for i in range(len(probabilities))}
 

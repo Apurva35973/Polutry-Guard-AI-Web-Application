@@ -1,8 +1,15 @@
-from pathlib import Path
 import os
 import sys
 import re
+from pathlib import Path
 
+# Restrict thread pools to 1 thread early to stay strictly under Render's 512MB RAM limit
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+os.environ.setdefault("TORCH_NUM_THREADS", "1")
 
 BACKEND_DIR = str(Path(__file__).resolve().parent)
 PROJECT_ROOT = str(Path(__file__).resolve().parents[1])

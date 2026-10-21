@@ -28,11 +28,22 @@ except LookupError:
     except Exception:
         pass
 
+# Restrict thread pools to 1 thread to stay strictly under Render's 512MB RAM limit
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+os.environ["TORCH_NUM_THREADS"] = "1"
+
 # Render dynamically assigns PORT, defaulting to 10000 on Render web services
 port = os.environ.get("PORT", "10000")
 bind = f"0.0.0.0:{port}"
 workers = int(os.environ.get("WEB_CONCURRENCY", "1"))
-threads = int(os.environ.get("PYTHON_GET_THREADS", "2"))
+threads = int(os.environ.get("PYTHON_GET_THREADS", "1"))
 timeout = int(os.environ.get("GUNICORN_TIMEOUT", "120"))
+# Periodically recycle worker to prevent memory accumulation in glibc heap
+max_requests = 100
+max_requests_jitter = 20
 accesslog = "-"
 errorlog = "-"
