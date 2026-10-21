@@ -93,7 +93,7 @@ def dashboard():
 
     # High risk farms count
     high_risk_farms = executeQuery(
-        """SELECT COUNT(DISTINCT farmer_id) count FROM Disease_Predictions WHERE risk_level='High' AND prediction_time >= DATE_SUB(NOW(), INTERVAL 7 DAY)""", ()
+        """SELECT COUNT(DISTINCT farmer_id) count FROM Disease_Predictions WHERE risk_level='High' AND prediction_time >= NOW() - INTERVAL '7 days'""", ()
     )[0]["count"]
 
     return createResult(None, {

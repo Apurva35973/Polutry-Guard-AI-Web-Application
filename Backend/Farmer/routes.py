@@ -601,7 +601,8 @@ def get_farmer_poultry_images():
     rows = executeQuery(
         """SELECT image_id, farmer_id, device_id, storage_bucket, storage_path, original_filename,
                   file_size_bytes, mime_type, source, processing_status, prediction_id,
-                  predicted_class, confidence, error_message, captured_at, created_at
+                  predicted_class, confidence, error_message,
+                  COALESCE(captured_at, created_at) AS captured_at, created_at
            FROM poultry_images
            WHERE farmer_id = %s
            ORDER BY created_at DESC LIMIT 50""",

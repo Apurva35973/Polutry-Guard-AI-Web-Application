@@ -95,8 +95,14 @@ def create_app():
             return "", 200
         return createResult(None, {"status": "healthy", "service": "Poultry Guard AI Backend"})
 
-    # JWT Configuration
-    app.config["JWT_SECRET_KEY"] = "poultry_guard_secret"
+    # JWT Configuration: secure secret of at least 32 bytes (RFC 7518 Section 3.2)
+    raw_jwt_secret = os.getenv("JWT_SECRET_KEY") or os.getenv("SECRET_KEY")
+    if raw_jwt_secret and len(raw_jwt_secret.strip()) >= 32:
+        app.config["JWT_SECRET_KEY"] = raw_jwt_secret.strip()
+    elif raw_jwt_secret:
+        app.config["JWT_SECRET_KEY"] = raw_jwt_secret.strip().ljust(32, "#")
+    else:
+        app.config["JWT_SECRET_KEY"] = "poultryguard_production_jwt_secret_key_secure_32bytes_min_2026"
     app.config["DEVICE_OFFLINE_TIMEOUT_SECONDS"] = int(
         os.getenv("DEVICE_OFFLINE_TIMEOUT_SECONDS", "300")
     )

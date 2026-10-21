@@ -21,13 +21,13 @@ def admin_only():
 
 
 def device_status_expression(alias="hk"):
-    timeout = int(current_app.config["DEVICE_OFFLINE_TIMEOUT_SECONDS"])
+    timeout = int(current_app.config.get("DEVICE_OFFLINE_TIMEOUT_SECONDS", 300))
     return f"""
         CASE
           WHEN {alias}.status IN ('Maintenance', 'Faulty', 'Available') THEN {alias}.status
           WHEN {alias}.assigned_farmer_id IS NULL THEN 'Available'
           WHEN {alias}.last_seen_at IS NOT NULL
-               AND {alias}.last_seen_at >= DATE_SUB(NOW(), INTERVAL {timeout} SECOND) THEN 'Online'
+               AND {alias}.last_seen_at >= NOW() - INTERVAL '{timeout} seconds' THEN 'Online'
           ELSE 'Offline'
         END
     """
@@ -331,6 +331,138 @@ def delete_vet():
         (vet_id,)
     )
 
+    return createResult(None, result)
+
+
+# ─── Vendors Management ────────────────────────────────────────────────────────
+@admin_bp.route("/vendors/all", methods=["GET"])
+@admin_bp.route("/vendors", methods=["GET"])
+@jwt_required()
+def get_all_vendors():
+    denied = admin_only()
+    if denied: return denied
+
+    query = """
+        SELECT
+            vendor_id,
+            COALESCE(full_name, owner_name, vendor_name) AS full_name,
+            COALESCE(business_name, vendor_name) AS business_name,
+            email,
+            phone_number,
+            COALESCE(vendor_type, 'Feed') AS vendor_type,
+            address,
+            latitude,
+            longitude,
+            status,
+            created_at,
+            updated_at
+        FROM Vendors
+        ORDER BY vendor_id DESC
+    """
+    rows = executeQuery(query, None)
+    return createResult(None, rows)
+
+
+@admin_bp.route("/vendor/add", methods=["POST"])
+@jwt_required()
+def add_vendor():
+    denied = admin_only()
+    if denied: return denied
+
+    data = request.get_json(silent=True) or {}
+    for f in ("full_name", "business_name", "email"):
+        if not data.get(f):
+            return createResult(f"{f} is required", None)
+
+    query = """
+        INSERT INTO Vendors (
+            full_name, business_name, email, phone_number,
+            vendor_type, address, latitude, longitude, status,
+            vendor_name, owner_name
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        )
+    """
+    lat = data.get("latitude") or None
+    lon = data.get("longitude") or None
+    params = (
+        data.get("full_name"),
+        data.get("business_name"),
+        data.get("email"),
+        data.get("phone_number"),
+        data.get("vendor_type", "Feed"),
+        data.get("address"),
+        lat,
+        lon,
+        data.get("status", "Active"),
+        data.get("business_name"),
+        data.get("full_name")
+    )
+    result = executeQuery(query, params)
+    return createResult(None, result)
+
+
+@admin_bp.route("/vendor/update", methods=["PUT"])
+@jwt_required()
+def update_vendor():
+    denied = admin_only()
+    if denied: return denied
+
+    vendor_id = request.args.get("vendor_id")
+    if not vendor_id:
+        return createResult("vendor_id is required", None)
+
+    data = request.get_json(silent=True) or {}
+    lat = data.get("latitude") or None
+    lon = data.get("longitude") or None
+
+    query = """
+        UPDATE Vendors
+        SET
+            full_name = %s,
+            business_name = %s,
+            email = %s,
+            phone_number = %s,
+            vendor_type = %s,
+            address = %s,
+            latitude = %s,
+            longitude = %s,
+            status = %s,
+            vendor_name = %s,
+            owner_name = %s,
+            updated_at = NOW()
+        WHERE vendor_id = %s
+    """
+    params = (
+        data.get("full_name"),
+        data.get("business_name"),
+        data.get("email"),
+        data.get("phone_number"),
+        data.get("vendor_type", "Feed"),
+        data.get("address"),
+        lat,
+        lon,
+        data.get("status", "Active"),
+        data.get("business_name"),
+        data.get("full_name"),
+        vendor_id
+    )
+    result = executeQuery(query, params)
+    return createResult(None, result)
+
+
+@admin_bp.route("/vendor/delete", methods=["DELETE"])
+@jwt_required()
+def delete_vendor():
+    denied = admin_only()
+    if denied: return denied
+
+    vendor_id = request.args.get("vendor_id")
+    if not vendor_id:
+        return createResult("vendor_id is required", None)
+
+    query = "DELETE FROM Vendors WHERE vendor_id = %s"
+    result = executeQuery(query, (vendor_id,))
     return createResult(None, result)
 
 @admin_bp.route("/devices/all", methods=["GET"])
@@ -756,12 +888,16 @@ def assignment_history():
 
 
 @admin_bp.route("/disease-alerts", methods=["GET"])
+@admin_bp.route("/alerts/all", methods=["GET"])
 @jwt_required()
 def disease_alerts():
     denied = admin_only()
     if denied: return denied
-    return createResult(None, executeQuery("""SELECT al.alert_id, f.full_name AS farmer_name, f.farm_name, al.alert_type AS risk_type,
-      UPPER(al.severity) AS risk_level, al.message, al.created_at, IF(al.acknowledged, 'Resolved', 'Open') AS status,
+    return createResult(None, executeQuery("""SELECT al.alert_id, f.full_name AS farmer_name, f.full_name, f.farm_name,
+      al.alert_type, al.alert_type AS risk_type,
+      INITCAP(al.severity) AS severity, UPPER(al.severity) AS risk_level,
+      al.message, al.created_at,
+      CASE WHEN al.acknowledged THEN 'Resolved' ELSE 'Open' END AS status,
       hk.esp32_device_id FROM Alerts al JOIN Farmers f ON f.farmer_id=al.farmer_id
       LEFT JOIN Device_Assignments da ON da.farmer_id=f.farmer_id AND da.status='Active'
       LEFT JOIN Hardware_Kits hk ON hk.hardware_kit_id=da.hardware_kit_id ORDER BY al.created_at DESC""", None))

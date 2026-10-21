@@ -294,11 +294,11 @@ def get_history(farm_id: str, limit: int = 100, time_range: str | None = None) -
         """
         params = [farm_id]
         if time_range == "24h":
-            query += " AND timestamp >= DATE_SUB(NOW(), INTERVAL 24 HOUR)"
+            query += " AND timestamp >= NOW() - INTERVAL '24 hours'"
         elif time_range == "7d":
-            query += " AND timestamp >= DATE_SUB(NOW(), INTERVAL 7 DAY)"
+            query += " AND timestamp >= NOW() - INTERVAL '7 days'"
         elif time_range == "30d":
-            query += " AND timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)"
+            query += " AND timestamp >= NOW() - INTERVAL '30 days'"
 
         query += " ORDER BY timestamp DESC LIMIT %s"
         params.append(limit)
