@@ -24,6 +24,7 @@ from Poultry_Guard_ML.cnn.config import (
     IMAGE_SIZE,
     MODEL_PATH,
     RAW_INDEX_TO_CLASS,
+    RESIZE_SIZE,
 )
 from Poultry_Guard_ML.common.utils import get_device, round_floats
 

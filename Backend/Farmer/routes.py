@@ -582,6 +582,10 @@ def upload_poultry_image_endpoint():
         "disclaimer": "AI-based screening only; not a confirmed veterinary diagnosis."
     }
 
+    if response_payload["processing_status"] == "failed":
+        err_msg = (prediction_result or {}).get("error", "AI image inference failed")
+        return createResult(err_msg, response_payload)
+
     return createResult(None, response_payload)
 
 
