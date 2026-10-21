@@ -66,15 +66,49 @@ def _build_dsn() -> str:
     return f"postgresql://{enc_user}:{enc_password}@{host}:{port}/{database}?sslmode={sslmode}"
 
 
+def _get_supabase_pooler_dsn(dsn: str) -> str:
+    """
+    Converts Supabase direct hostname (db.<ref>.supabase.co), which is IPv6-only,
+    to the IPv4-compatible Supabase Connection Pooler (aws-0-<region>.pooler.supabase.com:5432).
+    This prevents 'Network is unreachable' errors on cloud hosts like Render that lack IPv6.
+    """
+    if not dsn:
+        return dsn
+    match = re.search(r"@db\.([a-z0-9]+)\.supabase\.co(?::\d+)?", dsn)
+    if not match:
+        return dsn
+    ref = match.group(1)
+    region = (os.getenv("SUPABASE_REGION") or "ap-south-1").strip()
+    pooler_host = f"aws-0-{region}.pooler.supabase.com"
+    new_dsn = re.sub(r"@db\.[a-z0-9]+\.supabase\.co(?::\d+)?", f"@{pooler_host}:5432", dsn)
+    new_dsn = re.sub(r"://postgres:", f"://postgres.{ref}:", new_dsn)
+    return new_dsn
+
+
 def getConnection():
     dsn = _build_dsn()
+    pooler_dsn = _get_supabase_pooler_dsn(dsn)
+
+    # Prefer IPv4 pooler DSN if the URL uses db.<ref>.supabase.co (IPv6-only)
+    primary_dsn = pooler_dsn if pooler_dsn != dsn else dsn
+    fallback_dsn = dsn if primary_dsn == pooler_dsn else pooler_dsn
+
     try:
-        conn = psycopg2.connect(dsn, connect_timeout=10)
+        conn = psycopg2.connect(primary_dsn, connect_timeout=8)
         conn.autocommit = False
         with conn.cursor() as _cur:
             _cur.execute("SELECT 1")
         return conn
     except psycopg2.OperationalError as exc:
+        if fallback_dsn and fallback_dsn != primary_dsn:
+            try:
+                conn = psycopg2.connect(fallback_dsn, connect_timeout=8)
+                conn.autocommit = False
+                with conn.cursor() as _cur:
+                    _cur.execute("SELECT 1")
+                return conn
+            except Exception:
+                pass
         raise ConnectionError(
             f"Failed to connect to PostgreSQL: {exc}. "
             "Verify DATABASE_URL or PG* environment variables."
